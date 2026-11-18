@@ -6,10 +6,25 @@ invokes the CLI.
 
 ## Version
 
-Pinned to **OrcaSlicer v2.4.2** (`ORCA_VERSION` in `docker/Dockerfile`).
+Pinned to **OrcaSlicer v2.5.1** (`ORCA_VERSION` in `docker/Dockerfile`).
 The AppImage is extracted at image-build time (`--appimage-extract`; FUSE is
-unavailable in containers) into `/opt/orca`, and run via `xvfb-run` because the
-CLI still initialises wxWidgets/GL on some paths.
+unavailable in containers) into `/opt/orca`, made world-readable (2.5 extracts
+much of its tree `0700 root`, which the per-job slicer uid cannot run), and run
+via `xvfb-run` because the CLI still initialises wxWidgets/GL on some paths.
+
+Since 2.5 the AppImage ships its system presets only as compiled per-vendor
+caches (`resources/profiles/<vendor>.opc`, magic `ZCRO`). Everything here that
+reads presets — the flatten script, the worker's profile generation for a
+shop's printer, resolving an uploaded preset's parents — needs them as JSON,
+so the image also carries the same release's `resources/profiles` from the
+OrcaSlicer source tag, pinned by commit (`ORCA_SOURCE_COMMIT`), at
+`/opt/orca-profiles`. The build fails unless every vendor's JSON version equals
+the version in its `.opc` header, so a commit from another release can't slip in.
+
+2.5 also added `include`: a preset names templates (a printer's G-code, a
+filament family's shared settings) whose settings are layered over its parent,
+in order, under its own keys. Both flatteners resolve it the way OrcaSlicer
+does; the CLI never sees an `include`.
 
 The persistent cache version is independently pinned in
 `packages/shared/src/settings-key.ts`. Any Orca/profile change that can affect
@@ -94,9 +109,10 @@ flattened (its full inheritance chain merged) once and committed.
 
 ### Re-flattening (Orca upgrade or profile change)
 
-`scripts/flatten-orca-profiles.py` walks the `inherits` chain from the AppImage's
-`resources/profiles/BBL/` and writes flattened JSONs, validating that
-`filament_density > 0`. Filament presets land in `scripts/profile-sources/` as
+`scripts/flatten-orca-profiles.py` walks the `inherits` chain (and `include`s)
+from the release's `resources/profiles/BBL/` — a checkout of the OrcaSlicer tag,
+or `/opt/orca-profiles/BBL` in the image — and writes flattened JSONs,
+validating that `filament_density > 0`. Filament presets land in `scripts/profile-sources/` as
 overlay bases, never in `apps/worker/profiles/`, so re-flattening cannot clobber
 the Numakers profiles. Re-run it against the new AppImage, then re-run
 `overlay-numakers-profiles.py`, then the smoke check below before committing.
@@ -138,6 +154,12 @@ modules.
 Thumbnails are written beside the model file under `uploads/thumbs/`.
 
 ## Smoke / upgrade gate
+
+Last run for 2.4.2 → 2.5.1 (2026-11-18): all 8 tiers × 3 layer heights slice
+on both. Grams moved −0.3% to +0.9% (PLA at 0.20 mm: 3.78 → 3.81 g), print
+times 0.3–7% shorter (ABS/ASA the most). Bambu's own 0.20 mm Standard A1
+process now uses grid instead of crosshatch infill.
+
 
 After any Orca or profile change, slice the bundled calibration cube
 (`apps/worker/test-fixtures/calibration-cube.stl`) for every material × three

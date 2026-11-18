@@ -37,12 +37,13 @@ RUN apt-get update \
 # it runs on this base (verified by an image-level slice of a real STL). Keep
 # the AppImage name pinned to 2404 even as the base moves forward.
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03 AS orca
-ARG ORCA_VERSION=2.4.2
-ARG ORCA_SHA256=d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd
+ARG ORCA_VERSION=2.5.1
+ARG ORCA_SHA256=073b8105c928356141db0ddbce88b81d52c7a9e2442f9baae0a9089c89ff04eb
 ADD https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCA_VERSION}/OrcaSlicer_Linux_AppImage_Ubuntu2404_V${ORCA_VERSION}.AppImage /tmp/orca.AppImage
 # The headless worker never opens Orca's bundled GUI guide/include pages. Their
 # Swiper 7 copy is affected by GHSA-hmx5-qpq5-p643; remove the unused JavaScript
-# instead of carrying an exploitable package into the runtime.
+# instead of carrying an exploitable package into the runtime. (2.5 no longer
+# ships the guide/ copy; the path stays listed in case a release brings it back.)
 RUN echo "${ORCA_SHA256}  /tmp/orca.AppImage" | sha256sum -c - \
     && chmod +x /tmp/orca.AppImage \
     && cd /tmp \
@@ -50,7 +51,48 @@ RUN echo "${ORCA_SHA256}  /tmp/orca.AppImage" | sha256sum -c - \
     && rm -rf /tmp/squashfs-root/resources/web/guide/swiper \
         /tmp/squashfs-root/resources/web/include/swiper \
     && mv /tmp/squashfs-root /opt/orca \
+    # Orca runs as a per-job sandbox uid, never as the owner of these files. 2.5
+    # extracts ~400 directories (lib/, libexec/ with the AppRun helper, usr/…) as
+    # 0700 root, so every real slice failed with "Permission denied" while a
+    # root-run check passed. Make the tree world-readable, nothing writable.
+    && chmod -R u+rwX,go+rX,go-w /opt/orca \
     && rm /tmp/orca.AppImage
+
+# Since 2.5 the AppImage carries its system presets only as compiled per-vendor
+# caches (resources/profiles/<vendor>.opc). Profile generation for a shop's
+# printer and resolving an uploaded preset's `inherits`/`include` read them as
+# JSON, so take the very presets those caches were built from: the release
+# tag's resources/profiles, pinned by commit. ORCA_SOURCE_COMMIT must be the
+# commit of tag v${ORCA_VERSION}; the check below fails the build otherwise.
+ARG ORCA_SOURCE_COMMIT=eef7710cb102fdb51a9bcdbd9efd61047f44774a
+ADD https://github.com/OrcaSlicer/OrcaSlicer.git#${ORCA_SOURCE_COMMIT}:resources/profiles /tmp/orca-profiles
+# Keep only the preset JSON (covers, bed models and textures stay in /opt/orca),
+# and require every compiled cache to match its JSON's vendor version. The
+# cache header is "ZCRO", then little-endian u64 fields: at byte 24 the vendor
+# name's length and the name, then the version's length and the version, which
+# OrcaSlicer writes with four parts ("03.00.13" in re3D.json is "3.0.0.13").
+# So compare the nonzero parts, which survive that either way.
+RUN set -e; \
+    find /tmp/orca-profiles -type f ! -name '*.json' -delete; \
+    nonzero() { tr '.' '\n' | sed 's/^0*//' | grep . | paste -sd. -; }; \
+    checked=0; \
+    for opc in /opt/orca/resources/profiles/*.opc; do \
+        vendor=$(basename "$opc" .opc); \
+        json="/tmp/orca-profiles/$vendor.json"; \
+        [ -f "$json" ] || { echo "FATAL: no JSON presets for $vendor" >&2; exit 1; }; \
+        [ "$(head -c 4 "$opc")" = ZCRO ] || { echo "FATAL: $opc is not an OrcaSlicer preset cache" >&2; exit 1; }; \
+        name_len=$(od -An -tu8 -j 24 -N 8 "$opc" | tr -d ' '); \
+        ver_len=$(od -An -tu8 -j $((32 + name_len)) -N 8 "$opc" | tr -d ' '); \
+        cached=$(dd if="$opc" bs=1 skip=$((40 + name_len)) count="$ver_len" 2>/dev/null); \
+        shipped=$(grep -oE '"version"[[:space:]]*:[[:space:]]*"[0-9.]+"' "$json" | head -n1 | grep -oE '[0-9][0-9.]*'); \
+        [ -n "$shipped" ] && [ "$(printf '%s' "$shipped" | nonzero)" = "$(printf '%s' "$cached" | nonzero)" ] \
+            || { echo "FATAL: $vendor presets are $shipped, its OrcaSlicer cache $cached: ORCA_SOURCE_COMMIT is not v${ORCA_VERSION}" >&2; exit 1; }; \
+        checked=$((checked + 1)); \
+    done; \
+    [ "$checked" -gt 0 ] || { echo "FATAL: no OrcaSlicer preset caches found" >&2; exit 1; }; \
+    echo "OrcaSlicer presets: $checked vendors match their caches"; \
+    mv /tmp/orca-profiles /opt/orca-profiles; \
+    chmod -R u+rwX,go+rX,go-w /opt/orca-profiles
 
 # ---------- s6-overlay: the process supervisor ----------
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03 AS s6
@@ -98,7 +140,7 @@ RUN cd apps/worker && ./node_modules/.bin/esbuild ../web/scripts/hash-password.m
 # ---------- runtime ----------
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03
 
-ARG ORCA_VERSION=2.4.2
+ARG ORCA_VERSION=2.5.1
 ENV ORCA_VERSION=${ORCA_VERSION} \
     NODE_ENV=production \
     DEBIAN_FRONTEND=noninteractive \
@@ -174,6 +216,7 @@ RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack 
 
 COPY --from=s6 /s6root/ /
 COPY --from=orca /opt/orca /opt/orca
+COPY --from=orca /opt/orca-profiles /opt/orca-profiles
 
 # uid/gid 1001 owns the durable files (uploads, thumbnails, PDFs): the web runs
 # as it and the worker's STORAGE_UID/GID point at it. Slicer and parser jobs

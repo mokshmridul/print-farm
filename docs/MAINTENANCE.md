@@ -180,10 +180,13 @@ and `secrets/` across), start the new image, then `print-farm restore`.
 
 1. Download the exact official AppImage separately and calculate SHA-256.
 2. Update `ORCA_VERSION` and `ORCA_SHA256` in `docker/Dockerfile` (both
-   `ARG ORCA_VERSION` lines) and the worker's `slicerVersion` fallback in
-   `apps/worker/src/config.ts`.
-3. Re-flatten committed profiles and run the calibration-cube smoke gate in
-   [ORCA-PROFILES.md](ORCA-PROFILES.md).
+   `ARG ORCA_VERSION` lines), `ORCA_SOURCE_COMMIT` to the commit of the release
+   tag (`git ls-remote https://github.com/OrcaSlicer/OrcaSlicer.git refs/tags/v<version>`),
+   and the worker's `slicerVersion` fallback in `apps/worker/src/config.ts`.
+3. Re-flatten committed profiles from the tag's `resources/profiles/BBL` and run
+   the calibration-cube smoke gate in [ORCA-PROFILES.md](ORCA-PROFILES.md), then
+   `scripts/ci/image-smoke.sh`, which slices under the real sandbox uid — a
+   root-run check cannot see permission problems in the extracted AppImage.
 4. Scan the extracted runtime and confirm any GUI-only vulnerable assets pruned
    by the Dockerfile remain unnecessary to headless slicing.
 5. Bump `SLICE_PIPELINE_VERSION` in

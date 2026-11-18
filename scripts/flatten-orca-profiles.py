@@ -2,15 +2,16 @@
 """Flatten OrcaSlicer vendor profiles into standalone JSONs.
 
 OrcaSlicer's CLI loads profile files passed via --load-settings/--load-filaments
-verbatim: it does NOT resolve their `inherits` chains (observed on v2.4.1 —
+verbatim: it does NOT resolve their `inherits` chains (nor 2.5's `include`s) (observed on v2.4.1 —
 filament_density arrives as "0" and slice_info weight is empty). This script
 walks the inheritance chain inside the extracted AppImage's resources and emits
 fully-merged profiles for the Bambu Lab A1 / 0.4 mm nozzle setup we ship.
 
-Run inside the worker image (see docs/ORCA-PROFILES.md):
+OrcaSlicer 2.5's AppImage ships its presets only as compiled `<vendor>.opc`
+caches; the JSON they are built from is in the release's source tree, and in the
+image at /opt/orca-profiles. From a checkout of that tag:
 
-  docker run --rm -v "$PWD/apps/worker/profiles:/out" print-worker \
-    python3 /out/../scripts/... # or copy the script in; see docs
+  python3 scripts/flatten-orca-profiles.py <OrcaSlicer>/resources/profiles/BBL apps/worker/profiles
 
 Usage: flatten-orca-profiles.py <resources/profiles/BBL dir> <output dir>
 """
@@ -58,17 +59,32 @@ def build_index(vendor_root: Path) -> dict[str, Path]:
     return index
 
 
+# Preset metadata, which OrcaSlicer's JSON loader keeps out of a preset's config:
+# an `include` never carries it in (apps/worker/src/profile-gen.ts, same list).
+META_KEYS = {
+    "version", "is_custom_defined", "url", "name", "type", "setting_id", "filament_id",
+    "from", "description", "instantiation", "inherits", "include", "renamed_from",
+}
+
+
 def resolve(name: str, index: dict[str, Path], seen: tuple[str, ...] = ()) -> dict:
+    """The preset as OrcaSlicer loads it: the parent's whole chain, then each
+    `include`d template's own settings in the order listed (OrcaSlicer 2.5+),
+    then the preset's own keys."""
     if name in seen:
         raise RuntimeError(f"inheritance cycle: {' -> '.join(seen + (name,))}")
     if name not in index:
         raise RuntimeError(f"profile not found: {name!r} (needed by {seen[-1] if seen else '?'})")
     data = json.loads(index[name].read_text())
     parent_name = data.pop("inherits", None)
-    if not parent_name:
-        return data
-    merged = resolve(parent_name, index, seen + (name,))
-    merged.update(data)  # child keys win
+    includes = data.pop("include", [])
+    if isinstance(includes, str):
+        includes = [includes]
+    merged = resolve(parent_name, index, seen + (name,)) if parent_name else {}
+    for include in includes:
+        template = resolve(include, index, seen + (name,))
+        merged.update({k: v for k, v in template.items() if k not in META_KEYS})
+    merged.update(data)  # the preset's own keys win
     return merged
 
 
