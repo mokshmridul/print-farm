@@ -101,6 +101,8 @@ export function presetKind(p: OrcaProfile): ProfileKind | null {
 // somewhere, and `filename_format` names output files.
 const DROP_KEYS = new Set([
   "inherits",
+  // OrcaSlicer 2.5's preset templates; flattening has already layered them in.
+  "include",
   "setting_id",
   "filament_notes",
   "__vendor",

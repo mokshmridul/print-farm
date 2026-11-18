@@ -1,0 +1,14 @@
+# Self-host override, loaded through COMPOSE_FILE in the .env that install.sh
+# writes — never by print.rish.pw's own deployment.
+#
+# Pins the container's network so its gateway address is known in advance: a
+# reverse proxy or cloudflared on this same host reaches the published
+# loopback port through Docker, and the container sees that connection come
+# from the gateway. install.sh then trusts exactly that one address
+# (TRUSTED_PROXY_CIDR) to tell it the real visitor address.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${PRINT_SUBNET:?Run ./install.sh}
+          gateway: ${PRINT_GATEWAY:?Run ./install.sh}

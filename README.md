@@ -22,6 +22,19 @@ Update later with `sudo /opt/print-shop/update.sh`. See
 [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) for requirements, the HTTPS
 options, updates and rollback.
 
+Or run the image directly — everything is in one container with one data
+volume:
+
+```bash
+docker run -d --name print-farm -p 127.0.0.1:8080:8080 -v print-data:/data \
+  -e APP_ORIGIN=http://localhost:8080 ghcr.io/mokshmridul/print-farm:latest
+docker logs print-farm 2>&1 | grep -A2 "admin password"   # generated on first boot
+```
+
+It serves plain HTTP on :8080; put your reverse proxy or Cloudflare Tunnel in
+front for HTTPS. `docker-compose.yml` is the hardened version of the same
+(read-only root, dropped capabilities, memory limit).
+
 ## What's inside
 
 | Area | Tech |
@@ -32,7 +45,7 @@ options, updates and rollback.
 | Data | PostgreSQL + Prisma |
 | Queue / cache / rate limits | Redis |
 | PDF | @react-pdf/renderer |
-| Deploy | Docker Compose (proxy · web · worker · postgres · redis) |
+| Deploy | One image: nginx · web · worker · PostgreSQL · Redis under s6-overlay |
 
 ## Repository layout
 
@@ -44,7 +57,7 @@ print/
 │   ├── db/          Prisma schema + client singleton
 │   ├── shared/      catalog, pricing engine, zod schemas, helpers
 │   └── geometry/    STL/3MF/OBJ/AMF parser (bbox, volume, triangle soup)
-├── docker/          Dockerfiles + nginx proxy config
+├── docker/          the image: Dockerfile, s6 services + scripts (rootfs/), nginx site config
 └── docs/            architecture, install, deploy, env, db, api, pricing, …
 ```
 
@@ -59,7 +72,7 @@ DATABASE_URL=postgresql://print:print@localhost:5433/print \
 pnpm --filter @print/web dev                           # web on :3000
 ```
 
-The native slicer worker should run through its hardened container, not under a
+The native slicer worker should run inside the image, not under a
 credential-bearing local user. See the install guide for end-to-end slicing.
 
 See [docs/INSTALL.md](docs/INSTALL.md) for the full walkthrough and

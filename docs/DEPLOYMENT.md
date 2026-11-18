@@ -1,124 +1,107 @@
 # Deployment
 
-Production is a Docker Compose stack behind one public reverse proxy. The edge
-terminates TLS and reaches compose port 8080 only over a private/LAN/Tailscale
-route.
+Production is one container — the print-farm image — behind one public reverse
+proxy. The edge terminates TLS and reaches the container's port 8080 only over
+a private/LAN/Tailscale route.
 
 ```text
-Internet -> public reverse proxy (TLS) -> private route -> compose nginx:8080 -> web
-                                                        -> internal Postgres/Redis/worker
+Internet -> public reverse proxy (TLS) -> private route -> :8080 print-farm container
+                                                            nginx -> web (127.0.0.1:3000)
+                                                            worker, PostgreSQL, Redis (127.0.0.1 only)
 ```
+
+Inside, the s6-overlay supervisor starts `init` (data-dir ownership, first-boot
+secrets, rendered configs, printer profiles), PostgreSQL, Redis, a one-shot
+`migrate` (Prisma migrations + least-privilege roles), then the web, the worker
+and nginx. If `init` or `migrate` fails, the container stops instead of serving
+a half-started shop. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## 1. Prerequisites
 
 - Docker Engine and Docker Compose v2
-- This repository checked out
+- This repository checked out (for `docker-compose.yml`; the image itself comes
+  from `ghcr.io/mokshmridul/print-farm`)
 - DNS pointing at the public reverse proxy
 - A valid TLS certificate at that proxy
 - Encrypted off-host backup storage
 
-Node is not required on the production host unless generating the admin hash
-outside a container. Development/tooling requires Node.js 24 or newer.
-
-## 2. Configure secrets
+## 2. Configure
 
 ```bash
 cp .env.example .env
 chmod 0600 .env
 ```
 
-Generate independent random values. Do not reuse passwords:
+There are no database or Redis passwords to generate: the container creates
+them on first boot (64 hex characters each, from `openssl rand`) and keeps them
+root-only in `/data/secrets`, along with the session secret. The web role, the
+worker role and the schema owner each get their own.
 
-```bash
-openssl rand -hex 32   # SESSION_SECRET
-openssl rand -hex 32   # Postgres owner password
-openssl rand -hex 32   # web database password
-openssl rand -hex 32   # worker database password
-openssl rand -hex 32   # Redis password
-pnpm --filter @print/web hash-password
-```
-
-The password helper prompts on the terminal (at least 12 characters, at most 72
-UTF-8 bytes), so plaintext is not exposed in shell history or process listings.
-Double every `$` in the resulting bcrypt hash to `$$` in Compose `.env`.
-
-Set three distinct database URLs targeting the same database:
-
-```dotenv
-POSTGRES_USER=print_owner
-POSTGRES_PASSWORD=<owner-password>
-POSTGRES_DB=print
-MIGRATION_DATABASE_URL=postgresql://print_owner:<owner-password>@postgres:5432/print
-DATABASE_URL=postgresql://print_web:<web-password>@postgres:5432/print
-WORKER_DATABASE_URL=postgresql://print_worker:<worker-password>@postgres:5432/print
-```
-
-Percent-encode URL passwords when necessary. The short-lived migration service
-uses the owner URL, creates/rotates the runtime roles, revokes public access,
-and reapplies explicit grants. Web and worker receive only their own runtime
-role.
-
-For an existing Postgres volume, keep its original `POSTGRES_USER` as the owner
-and use that role in `MIGRATION_DATABASE_URL`; changing the environment value
-does not rename an already-created database role. Choose two new runtime role
-names/URLs. The next migration run provisions them before the app starts.
-
-Also set:
+Set:
 
 - `APP_ORIGIN=https://print.rish.pw`
 - `PROXY_BIND` to the private host address reached by the edge, never
   `0.0.0.0`
-- `TRUSTED_PROXY_CIDR` to the exact source host seen from the edge: one IPv4
-  address (no prefix or `/32`) or unbracketed IPv6 address (no prefix or `/128`)
+- `TRUSTED_PROXY_CIDR` to the exact source host seen from inside the
+  container: one IPv4 address (no prefix or `/32`) or unbracketed IPv6 address
+  (no prefix or `/128`). Docker preserves the source address of traffic arriving
+  on a non-loopback `PROXY_BIND`; a proxy on the same host using a loopback bind
+  appears as the Docker network's gateway instead.
+- the admin login: `ADMIN_PASSWORD` (hashed on first boot), a pinned
+  `ADMIN_PASSWORD_HASH` in single quotes, or neither and read the generated one
+  from the first boot's logs
 - optional provider/business values documented in [ENV.md](ENV.md)
 
-## 3. Build, migrate, and start
+Moving an existing deployment here? Pin its `SESSION_SECRET` in `.env` (admin
+settings sealed with it stay readable) and see [MAINTENANCE.md](MAINTENANCE.md#moving-an-existing-database-in)
+for the database.
+
+## 3. Start
 
 ```bash
 docker compose config --quiet
-docker compose up -d --build
-docker compose ps
-docker compose logs migrate
+docker compose pull            # or: docker compose build
+docker compose up -d
+docker compose ps              # wait for "healthy"
+docker compose logs --tail 80
 ```
 
-Compose fails interpolation when `TRUSTED_PROXY_CIDR` is empty. The proxy then
-validates it again before nginx template expansion and refuses broad prefixes,
-hostnames, lists, malformed addresses, and configuration metacharacters.
+The renderer validates `TRUSTED_PROXY_CIDR` before nginx starts and refuses
+broad prefixes, hostnames, lists, malformed addresses and configuration
+metacharacters; the container then stops with the reason in its log. Empty, no
+forwarder is trusted: every peer is served as itself. That suits a local test,
+never production behind a proxy, where every visitor would share the proxy's
+rate limits.
 
-The one-shot `migrate` service must exit with status 0 before web or worker can
-start. It applies Prisma migrations and least-privilege grants. To deliberately
-rerun it after a grant/credential change:
+Migrations and role provisioning run on every start, before web and worker.
+To rerun them deliberately (after restoring a dump, say), restart the
+container, or use `print-farm restore`, which re-provisions by itself.
 
-```bash
-docker compose run --rm migrate
-docker compose up -d web worker
-```
-
-The worker image is large because it includes OrcaSlicer. For encrypted
-bind-mounted storage, include `docker-compose.vault.yml` as described in
+The image is large because it includes OrcaSlicer. For encrypted bind-mounted
+storage, include `docker-compose.vault.yml` as described in
 [STORAGE_VAULT_LXC.md](STORAGE_VAULT_LXC.md).
 
-Check service health from inside the compose proxy, where the published-port
-transport allowlist does not apply:
+Check health from inside the container, where the transport allowlist does not
+apply:
 
 ```bash
-docker compose exec -T proxy wget -qO- http://web:3000/api/health
+docker compose exec print-farm print-farm health && echo healthy
 ```
 
 After the outer edge is configured, also verify the complete trusted path with
 `curl --fail --silent --show-error https://print.rish.pw/api/health`. A host-side
-curl to the private bind may correctly receive 403 because compose nginx accepts
-HTTP only from `TRUSTED_PROXY_CIDR`.
+curl to the private bind may correctly receive 403 because the container's
+nginx accepts HTTP only from `TRUSTED_PROXY_CIDR`.
 
 ## 4. Public reverse proxy
 
-There must be only one public ingress. Firewall compose port 8080 so only that
+There must be only one public ingress. Firewall port 8080 so only that
 exact proxy host can reach it. The outer edge must redirect HTTP, terminate TLS,
 **overwrite** (not append or preserve) `X-Real-IP` and `X-Forwarded-For` with the
 TCP client's address, set the original scheme, omit query strings and referrers
 from logs, and grant the large body allowance only to the exact upload endpoint.
-The compose proxy independently overwrites both IP headers before they reach the
-application and returns 403 to any transport peer other than the configured
+The container's nginx independently overwrites both IP headers before they reach
+the application and returns 403 to any transport peer other than the configured
 outer edge host. The firewall remains mandatory as the first boundary.
 
 ### Plain nginx example
@@ -201,7 +184,7 @@ small JSON endpoints become buffering/slow-body targets at the edge.
   `X-Forwarded-For` with `$remote_addr`; it must not pass a browser-supplied
   forwarding chain through unchanged.
 - Set `TRUSTED_PROXY_CIDR` and the port-8080 firewall allowlist to the one NPM
-  source host as observed by the compose proxy.
+  source host as observed by the container.
 
 ### Verify the proxy trust cutover
 
@@ -213,19 +196,19 @@ Perform this before opening production traffic:
    nonmatching host such as `127.0.0.1` for this short discovery window.
 2. Send a request with a unique path through the outer edge. A wrong provisional
    value safely returns 403 but still writes an access entry. Inspect
-   `docker compose logs proxy`: each line records `peer=<transport>` and
+   `docker compose logs`: each nginx line records `peer=<transport>` and
    `client=<adopted browser>`, without query strings or referrers. Set
-   `TRUSTED_PROXY_CIDR` to that exact `peer` host and recreate the proxy with
-   `docker compose up -d --force-recreate proxy`.
+   `TRUSTED_PROXY_CIDR` to that exact `peer` host and recreate the container
+   with `docker compose up -d`.
 3. Request through the edge from two known client networks. Their log entries
    must have the same expected `peer` but distinct, correct `client` addresses.
    If `peer` and `client` remain identical, the trusted host is wrong or the
    outer edge did not overwrite `X-Real-IP`.
 4. From the trusted edge host only, make a direct probe to port 8080 with a
-   reserved test address such as `X-Real-IP: 192.0.2.123`; the compose log should
+   reserved test address such as `X-Real-IP: 192.0.2.123`; the container log should
    show the edge as `peer` and the marker as `client`. Then confirm a non-edge
    host cannot connect to port 8080 at all. If a controlled firewall test does
-   let that host connect, compose nginx must return 403 without proxying it.
+   let that host connect, the container's nginx must return 403 without proxying it.
 
 Trust a NAT/subnet-router address only when the firewall guarantees that other
 clients sharing that source cannot reach port 8080. The validator intentionally
@@ -237,15 +220,16 @@ second publicly reachable path to port 8080.
 ## 5. Operations
 
 ```bash
-docker compose logs -f web worker
-docker compose restart web
-docker compose pull
-docker compose up -d --build
+docker compose logs -f --tail 100
+docker compose restart
+docker compose pull && docker compose up -d     # new image
+docker compose exec -T print-farm print-farm backup > print.pgdump
 ```
 
 Review migration SQL, image-digest updates, CI scans, backups, and the Orca
 smoke gate before deploying. See [MAINTENANCE.md](MAINTENANCE.md) and
 [SECURITY.md](SECURITY.md).
 
-Only compose nginx publishes a port. PostgreSQL and authenticated Redis remain
-on the internal backend network; the worker has no edge-network attachment.
+Only the container's nginx listens outside it. PostgreSQL, Redis and the web
+listen on 127.0.0.1 inside the container, each password-protected; the web and
+worker connect with separate least-privilege database roles.

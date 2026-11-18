@@ -8,9 +8,16 @@
  *   node dist/profile-gen.js list [profilesRoot]
  *   node dist/profile-gen.js generate "<machine preset name>" <outDir> [--multi-material] [--name "<shown name>"] [profilesRoot]
  *
- * The Orca CLI does not resolve `inherits`, so every profile is flattened. A
- * preset's parent may live in another vendor's folder (OrcaFilamentLibrary
- * generics are everyone's fallback), so the index spans every vendor.
+ * The Orca CLI does not resolve `inherits` or `include`, so every profile is
+ * flattened the way OrcaSlicer itself loads a system preset: the parent's whole
+ * chain, then each `include`d template's own settings in the order listed, then
+ * the preset's own keys. A preset's parent may live in another vendor's folder
+ * (OrcaFilamentLibrary generics are everyone's fallback), so the index spans
+ * every vendor.
+ *
+ * It reads the presets as JSON. OrcaSlicer 2.5's AppImage ships them only as
+ * compiled per-vendor caches (`<vendor>.opc`), so the image carries the same
+ * release's JSON presets beside it, at DEFAULT_PROFILES_ROOT (docker/Dockerfile).
  * The Bambu Lab A1 keeps the hand-tuned Numakers set committed in
  * apps/worker/profiles instead (scripts/overlay-numakers-profiles.py).
  */
@@ -37,7 +44,40 @@ interface IndexEntry {
   path: string;
 }
 
-export const DEFAULT_PROFILES_ROOT = "/opt/orca/resources/profiles";
+export const DEFAULT_PROFILES_ROOT = "/opt/orca-profiles";
+
+/** Preset metadata — never configuration, so an `include` never carries it in.
+ *  (The keys OrcaSlicer's JSON loader keeps out of a preset's config.) */
+const PRESET_META_KEYS = new Set([
+  "version",
+  "is_custom_defined",
+  "url",
+  "name",
+  "type",
+  "setting_id",
+  "filament_id",
+  "from",
+  "description",
+  "instantiation",
+  "inherits",
+  "include",
+  "renamed_from",
+  "__vendor",
+]);
+
+/** A preset's `include` list (one name or an array), removed from it. */
+function takeIncludes(profile: Profile): string[] {
+  const raw = profile.include;
+  delete profile.include;
+  if (raw === undefined || raw === null) return [];
+  return (Array.isArray(raw) ? raw : [raw]).filter((n): n is string => typeof n === "string" && n.length > 0);
+}
+
+function configOf(profile: Profile): Profile {
+  const out: Profile = {};
+  for (const [key, value] of Object.entries(profile)) if (!PRESET_META_KEYS.has(key)) out[key] = value;
+  return out;
+}
 export const A1_MACHINE = "Bambu Lab A1 0.4 nozzle";
 
 // ── Index + flattening ────────────────────────────────────────────────────────
@@ -84,7 +124,8 @@ export class ProfileIndex {
     return { profile: JSON.parse(readFileSync(hit.path, "utf8")) as Profile, vendor: hit.vendor };
   }
 
-  /** The preset with its whole `inherits` chain merged (child keys win). */
+  /** The preset with its whole `inherits` chain merged, its `include`d
+   *  templates layered over that in order, and its own keys on top. */
   flatten(kind: Kind, name: string, preferVendor?: string, seen: string[] = []): Profile & { __vendor: string } {
     if (seen.includes(name)) throw new Error(`inheritance cycle: ${[...seen, name].join(" -> ")}`);
     const found = this.raw(kind, name, preferVendor);
@@ -92,29 +133,38 @@ export class ProfileIndex {
     const { profile, vendor } = found;
     const parent = typeof profile.inherits === "string" && profile.inherits ? profile.inherits : null;
     delete profile.inherits;
+    const includes = takeIncludes(profile);
     const merged = parent ? this.flatten(kind, parent, vendor, [...seen, name]) : { __vendor: vendor };
+    for (const include of includes) {
+      Object.assign(merged, configOf(this.flatten(kind, include, vendor, [...seen, name])));
+    }
     return Object.assign(merged, profile, { __vendor: vendor });
   }
 
   /** A preset that isn't in the index — one the owner uploaded — with its
-   *  `inherits` chain resolved: first against presets uploaded with it (a
-   *  bundle), then against the presets this OrcaSlicer ships. */
+   *  `inherits` chain and `include`s resolved: first against presets uploaded
+   *  with it (a bundle), then against the presets this OrcaSlicer ships. */
   flattenPreset(kind: Kind, preset: Profile, peers: readonly Profile[] = [], seen: string[] = []): Profile {
     const name = String(preset.name ?? "");
     if (seen.includes(name)) throw new Error(`inheritance cycle: ${[...seen, name].join(" -> ")}`);
     const own: Profile = { ...preset };
     const parent = typeof own.inherits === "string" && own.inherits ? own.inherits : null;
     delete own.inherits;
-    if (!parent) return own;
-    const peer = peers.find((p) => p !== preset && p.name === parent);
-    if (peer) return Object.assign(this.flattenPreset(kind, peer, peers, [...seen, name]), own);
-    if (!this.raw(kind, parent)) {
-      throw new Error(
-        `"${name}" is based on "${parent}", which isn't one of the presets this OrcaSlicer ships. ` +
-          "Export it together with the preset it's based on (as a bundle), or pick a system preset as its parent.",
-      );
-    }
-    return Object.assign(this.flatten(kind, parent), own);
+    const includes = takeIncludes(own);
+    const resolve = (ref: string, role: string): Profile => {
+      const peer = peers.find((p) => p !== preset && p.name === ref);
+      if (peer) return this.flattenPreset(kind, peer, peers, [...seen, name]);
+      if (!this.raw(kind, ref)) {
+        throw new Error(
+          `"${name}" ${role} "${ref}", which isn't one of the presets this OrcaSlicer ships. ` +
+            "Export it together with the preset it's based on (as a bundle), or pick a system preset as its parent.",
+        );
+      }
+      return this.flatten(kind, ref);
+    };
+    const merged: Profile = parent ? resolve(parent, "is based on") : {};
+    for (const include of includes) Object.assign(merged, configOf(resolve(include, "includes")));
+    return Object.assign(merged, own);
   }
 
   /** Every instantiable preset of a kind, flattened. */
@@ -393,7 +443,11 @@ export async function main(argv: string[]) {
   process.exitCode = 64;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+// The worker bundle (dist/index.js) inlines this module through profile-test,
+// and there import.meta.url is the bundle's own URL, so the URL check alone
+// would run this CLI inside the worker. Require the entry file to be this one.
+const entry = process.argv[1] ?? "";
+if (/profile-gen\.[cm]?[jt]s$/.test(entry) && import.meta.url === pathToFileURL(entry).href) {
   main(process.argv.slice(2)).catch((err: unknown) => {
     process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
     process.exitCode = 1;

@@ -4,7 +4,7 @@
 
 - Node.js 24 or newer and pnpm 9 (`corepack enable`)
 - Docker and Docker Compose v2 for Postgres/Redis
-- The hardened worker container for real slicing; UI/API work can run web-only
+- The print-farm image for real slicing; UI/API work can run web-only
 
 ## 1. Install dependencies
 
@@ -73,14 +73,15 @@ worker casually under your login: it fails closed when it cannot isolate Orca
 from credentials. `ALLOW_INSECURE_SLICER=true` is an explicit local-only escape
 hatch and gives hostile native code access to worker credentials/uploads.
 
-For end-to-end slicing, configure the production-style root `.env` and run the
-hardened Compose stack:
+For end-to-end slicing, build and run the image (no `.env` needed for a local
+try; it serves `http://localhost:8080`):
 
 ```bash
 docker compose up -d --build
+docker compose logs | grep -A2 "admin password"
 ```
 
-Then use the private compose proxy on port 8080. See
+`scripts/ci/image-smoke.sh <image>` runs the same end-to-end check CI does. See
 [DEPLOYMENT.md](DEPLOYMENT.md).
 
 CI also drives the complete HTTP funnel with a source-run worker and fixed

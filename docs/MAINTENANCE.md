@@ -2,9 +2,11 @@
 
 ## Backups
 
-Durable state includes PostgreSQL (quotation/customer PII and slice cache),
-uploads/thumbnails, and PDFs. Database dumps and PDFs are sensitive even when
-model files have expired.
+Durable state lives in the container's `/data` volume: PostgreSQL
+(quotation/customer PII and slice cache) in `postgres/`, uploads/thumbnails in
+`uploads/`, PDFs in `pdfs/`, and the generated database/Redis/session secrets in
+`secrets/`. Database dumps, PDFs and `secrets/` are sensitive even when model
+files have expired.
 
 Create backups through a same-directory temporary file, publishing the dump by
 atomic rename only after `pg_dump` succeeds and produces non-empty output:
@@ -18,9 +20,8 @@ atomic rename only after `pg_dump` succeeds and produces non-empty output:
   trap 'rm -f -- "$tmp"' EXIT
   trap 'exit 1' HUP INT TERM
 
-  if docker compose exec -T postgres sh -c \
-      'exec pg_dump --format=custom -U "$POSTGRES_USER" "$POSTGRES_DB"' \
-      > "$tmp" && test -s "$tmp"; then
+  if docker compose exec -T print-farm print-farm backup > "$tmp" \
+      && test -s "$tmp"; then
     mv -- "$tmp" "$backup"
     trap - EXIT HUP INT TERM
   else
@@ -38,9 +39,10 @@ PDFs, and model files; an untested backup is unverified.
 
 A complete point-in-time set contains the PostgreSQL custom dump,
 `uploads.tar.gz`, `pdfs.tar.gz`, and a checksum manifest. A database-only dump
-is incomplete. Quiesce writes by stopping proxy, web, and worker while leaving
-PostgreSQL running; create all three artifacts in that window, then restart the
-services immediately. The transfer commands in
+is incomplete. Quiesce writes by stopping web and worker while leaving
+PostgreSQL running (`docker compose exec print-farm s6-rc -d change web worker`);
+create all three artifacts in that window, then restart them immediately
+(`s6-rc -u change web worker`). The transfer commands in
 [STORAGE_VAULT_LXC.md](STORAGE_VAULT_LXC.md#6-move-data-from-the-current-lxc)
 show the archive shape. Publish artifacts only after non-empty checks,
 `pg_restore --list`, tar listing, and `sha256sum -c` all pass.
@@ -140,18 +142,59 @@ configured threshold (90 days by default and at most) are needed, download the
 admin CSV export periodically and retain it under an appropriate access and
 deletion policy. The sweep does not preserve a long-term reporting copy.
 
+### Restoring a dump
+
+```bash
+docker compose exec -T print-farm print-farm restore < postgres-….dump
+```
+
+It pauses web and worker, replaces the database in one transaction (objects
+are re-owned by the schema owner whatever role owned them in the source), re-runs
+migrations and role provisioning, and starts them again. A failed restore rolls
+back and leaves the database as it was.
+
+### Moving an existing database in
+
+From the old multi-container stack, or any PostgreSQL holding this schema:
+
+1. `pg_dump --format=custom --no-owner --no-privileges` from the old database.
+2. Start the new container once (`docker compose up -d`) so it creates its own
+   empty, migrated database, and wait for healthy.
+3. `print-farm restore < old.dump` as above.
+4. Copy the old uploads and PDFs into `/data/uploads` and `/data/pdfs`; `init`
+   fixes their ownership on the next start (`docker compose restart`).
+5. Pin the old `SESSION_SECRET` in `.env` so sealed admin settings stay readable.
+
+Self-hosted installs do all of this by themselves on their first `update.sh`
+to the single image (see [SELF-HOSTING.md](SELF-HOSTING.md#moving-from-the-old-layout)).
+
+### Upgrading PostgreSQL
+
+A PostgreSQL data directory belongs to one major version, and the container
+refuses to start on a data directory from another one. When a new image brings
+a new major version: take `print-farm backup` on the old image, move
+`/data/postgres` aside (or start with a new volume and copy `uploads/`, `pdfs/`
+and `secrets/` across), start the new image, then `print-farm restore`.
+
 ## Upgrading OrcaSlicer or profiles
 
 1. Download the exact official AppImage separately and calculate SHA-256.
-2. Update `ORCA_VERSION` and `ORCA_SHA256` in `docker/worker.Dockerfile`.
-3. Re-flatten committed profiles and run the calibration-cube smoke gate in
-   [ORCA-PROFILES.md](ORCA-PROFILES.md).
+2. Update `ORCA_VERSION` and `ORCA_SHA256` in `docker/Dockerfile` (both
+   `ARG ORCA_VERSION` lines), `ORCA_SOURCE_COMMIT` to the commit of the release
+   tag (`git ls-remote https://github.com/OrcaSlicer/OrcaSlicer.git refs/tags/v<version>`),
+   and the worker's `slicerVersion` fallback in `apps/worker/src/config.ts`.
+3. Re-flatten committed profiles from the tag's `resources/profiles/BBL` and run
+   the calibration-cube smoke gate in [ORCA-PROFILES.md](ORCA-PROFILES.md), then
+   `scripts/ci/image-smoke.sh`, which slices under the real sandbox uid — a
+   root-run check cannot see permission problems in the extracted AppImage.
 4. Scan the extracted runtime and confirm any GUI-only vulnerable assets pruned
    by the Dockerfile remain unnecessary to headless slicing.
 5. Bump `SLICE_PIPELINE_VERSION` in
    `packages/shared/src/settings-key.ts`. This is mandatory for any slicer,
    machine, process, or filament change that can affect toolpaths.
-6. Rebuild and deploy the worker.
+6. Regenerate `docker/selfhost/printers.tsv` from the new image (see
+   [SELF-HOSTING.md](SELF-HOSTING.md#for-the-maintainer-shipping-updates-to-self-hosters)).
+7. Rebuild and deploy the image.
 
 Old cache rows remain in PostgreSQL but the versioned key makes them harmless
 misses. Never leave them active after a toolpath-affecting upgrade.
@@ -164,20 +207,21 @@ replace step 3.
 ```bash
 git pull --ff-only
 docker compose config --quiet
-docker compose up -d --build
+docker compose pull            # or: docker compose build
+docker compose up -d
 docker compose ps
-docker compose logs migrate
+docker compose logs --tail 80
 ```
 
-The short-lived migration service applies reviewed SQL and re-provisions web
-and worker grants before either starts. Treat destructive/irreversible
+The container's one-shot `migrate` step applies reviewed SQL and re-provisions
+web and worker grants before either starts. Treat destructive/irreversible
 migrations as a release decision; checking out old code does not reverse data
 changes.
 
 Pinned image digests, pnpm dependencies, Actions, CodeQL, and Trivy are tracked
 by CI/Dependabot. Builds use pinned pnpm 11 and reject dependency releases less
 than 24 hours old; review any exception instead of disabling that policy.
-Release checks should also scan the final web, migration, and worker images,
+Release checks should also scan the final image,
 including advisories without a current fix, because base-image tools are not
 visible in a lockfile-only scan. The fix-available CI gate is actionable but
 does not imply that the all-advisory report is empty. Review updates and rerun
@@ -190,9 +234,10 @@ tests/build/smoke slicing before deployment.
   unreachable Redis for more than one minute sends a static, PII-free Telegram
   operator alert when Telegram is configured. Repeats are capped to one per 15
   minutes and report the number suppressed; recovery resets the outage timer.
-- Worker health checks publish `worker:heartbeat` in authenticated Redis. The
-  web service observes it so the backend-only worker and untrusted Orca child
-  receive neither Telegram credentials nor an internet route.
+- The worker publishes `worker:heartbeat` in authenticated Redis, and the
+  container's health check (`print-farm health`) requires it alongside the web,
+  database and Redis. The web observes it too, so the worker and the untrusted
+  Orca child never receive Telegram credentials.
 - When Telegram is configured, unexpected checkout exceptions, checkout
   capacity 503s, quotation-PDF failures, the Shiprocket daily cap, and
   ingest queue saturation also send static alerts without customer data.
@@ -207,7 +252,7 @@ tests/build/smoke slicing before deployment.
   introduce sensitive data.
 
 ```bash
-docker compose logs -f web worker migrate
+docker compose logs -f --tail 200
 ```
 
 ## Rotating access credentials
@@ -215,21 +260,22 @@ docker compose logs -f web worker migrate
 Admin password:
 
 ```bash
-pnpm --filter @print/web hash-password
+docker compose exec print-farm print-farm admin-password
 ```
 
-Put the doubled-dollar hash in production `.env` and recreate web. Changing the
-hash does **not** revoke already-issued 12-hour admin JWTs. For emergency global
+It prompts, stores the new hash in the volume and restarts the web. (If
+`ADMIN_PASSWORD_HASH` is pinned in `.env`, change it there instead and
+`docker compose up -d`.) Changing the hash does **not** revoke already-issued 12-hour admin JWTs. For emergency global
 revocation also rotate `SESSION_SECRET`; this invalidates admin sessions,
 anonymous quote sessions, and shipping estimate tokens. It does not revoke
 30-day quotation capabilities; delete the quotation to revoke one immediately.
 
-To rotate web/worker database passwords, update their runtime URLs and rerun the
-migration service with the still-valid owner URL; it rotates both roles before
-the services restart. Rotate the owner interactively first with `psql`'s
-`\password <owner-role>`, then update `POSTGRES_PASSWORD` and
-`MIGRATION_DATABASE_URL`. Rotate Redis by coordinating the server password and
-both clients; expect queued/rate-limit state disruption if replacing its data.
+To rotate the database or Redis passwords, delete the corresponding file in
+`/data/secrets` (`postgres-owner-password`, `postgres-web-password`,
+`postgres-worker-password`, `redis-password`) and restart the container: `init`
+generates a new one, and `migrate` sets every role's password from those files
+on each start. Rotating `session-secret` the same way has the effects described
+above.
 
 ## Common issues
 
@@ -239,8 +285,8 @@ both clients; expect queued/rate-limit state disruption if replacing its data.
 | Upload returns 408 | The absolute 10-minute body deadline elapsed. |
 | Upload is queued at 0 but not processing | Check `worker:heartbeat`, worker logs, and authenticated Redis; the UI reports when the processor is offline. |
 | Upload returns `INGEST_QUEUE_FULL` | The bounded FIFO already has 25 outstanding uploads. Check worker health/latency and disk before raising capacity elsewhere; the bound is intentional. |
-| Admin login always fails after Compose edit | Bcrypt `$` was not doubled to `$$` in root `.env`. |
-| Web/worker wait indefinitely | Inspect the one-shot `migrate` exit/log and role URLs. |
+| Admin login always fails after Compose edit | A pinned `ADMIN_PASSWORD_HASH` in `.env` is not in single quotes, so Compose interpolated its `$`. |
+| Container stops right after starting | `init` or `migrate` failed; the reason is at the end of `docker compose logs`. |
 | Slice stays queued | Check worker health, authenticated Redis, and pipeline/Orca version match. |
 | Redis `NOAUTH` | Server/client password or percent-encoding differs. |
-| Prisma engine missing | Regenerate the client and rebuild the pinned Node 24 image. |
+| Prisma engine missing | Regenerate the client and rebuild the image. |

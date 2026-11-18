@@ -1,0 +1,118 @@
+#!/bin/bash
+# print-farm — maintenance commands inside the container.
+#
+#   docker exec <container> print-farm <command>
+#
+#   health                     exit 0 when web, database, Redis and the worker are up
+#   admin-password             set a new admin password (prompted, or read from stdin)
+#   seed-settings [--if-missing] < settings.json
+#                              write shop settings (siteProfile, pricing,
+#                              catalogAvailability, faq) straight into the database
+#   backup > file.pgdump       consistent database dump (custom format)
+#   restore < file.pgdump      replace the database with a dump; web and worker
+#                              are paused meanwhile and the runtime roles re-provisioned
+#   psql                       an interactive SQL shell as the schema owner
+#   version                    image version details
+PF_COMPONENT=print-farm
+# shellcheck source=../lib/print-farm/common.sh
+. /usr/local/lib/print-farm/common.sh
+
+usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; }
+
+[ "$(id -u)" -eq 0 ] || die "Run as root: docker exec <container> print-farm $*"
+
+# Connect as the schema owner over loopback. The password is exported to the
+# client, never passed on its command line.
+with_owner_pg() {
+  export PGHOST=$PG_HOST PGPORT=$PG_PORT PGDATABASE=$DB_NAME PGUSER=$OWNER_ROLE
+  PGPASSWORD=$(secret postgres-owner-password)
+  export PGPASSWORD
+  "$@"
+}
+
+cmd_health() {
+  node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))" \
+    || { echo "web is not healthy" >&2; exit 1; }
+  REDISCLI_AUTH=$(secret redis-password)
+  export REDISCLI_AUTH
+  # The worker refreshes worker:heartbeat (TTL 30s) while alive.
+  [ "$(redis-cli -h 127.0.0.1 -p "$REDIS_PORT" --no-auth-warning exists worker:heartbeat)" = 1 ] \
+    || { echo "worker heartbeat missing" >&2; exit 1; }
+}
+
+cmd_admin_password() {
+  [ -z "$(cenv ADMIN_PASSWORD_HASH)" ] || die "ADMIN_PASSWORD_HASH is set in the container's environment, which takes precedence.
+  Change or remove it there (and recreate the container) instead."
+  local hash
+  # hash-password.mjs prompts on a terminal and reads stdin otherwise; it
+  # refuses anything under 12 or over 72 bytes.
+  hash=$(node /opt/tools/hash-password.mjs | tail -n1) || die "The password was not changed."
+  [[ "$hash" =~ ^\$2[aby]\$1[2-9]\$[./A-Za-z0-9]{53}$ ]] || die "Hashing failed; the password was not changed."
+  printf '%s' "$hash" > "$SECRETS_DIR/admin-password-hash.tmp"
+  mv "$SECRETS_DIR/admin-password-hash.tmp" "$SECRETS_DIR/admin-password-hash"
+  rm -f "$SECRETS_DIR/initial-admin-password"
+  svc_restart web
+  log "Admin password changed; the web is restarting."
+}
+
+cmd_seed_settings() {
+  local -a e=(PATH=/usr/local/bin:/usr/bin:/bin HOME=/tmp "DATABASE_URL=$(owner_db_url)")
+  ( exec_with_env e s6-setuidgid "$STORAGE_USER" node /app/scripts/seed-settings.mjs "$@" )
+}
+
+cmd_backup() {
+  [ ! -t 1 ] || die "Redirect the dump to a file: docker exec <container> print-farm backup > print.pgdump"
+  with_owner_pg pg_dump --format=custom --no-owner --no-privileges
+}
+
+cmd_restore() {
+  [ ! -t 0 ] || die "Feed the dump on stdin: docker exec -i <container> print-farm restore < print.pgdump"
+  local tmp
+  tmp=$(mktemp /tmp/restore.XXXXXX)
+  cat > "$tmp"
+  [ -s "$tmp" ] || { rm -f "$tmp"; die "The dump is empty; nothing was changed."; }
+  log "Pausing web and worker…"
+  s6-rc -d change web worker
+  local status=0
+  # Restored as the owner, so every object belongs to it again whatever role
+  # owned it where the dump was taken; grants are re-provisioned below.
+  with_owner_pg pg_restore --clean --if-exists --no-owner --no-privileges --single-transaction \
+    -d "$DB_NAME" "$tmp" || status=$?
+  rm -f "$tmp"
+  if [ "$status" -eq 0 ]; then
+    log "Restored; re-applying migrations and runtime roles…"
+    "$LIB_DIR/migrate.sh" || status=$?
+  else
+    log "pg_restore failed (status $status); the transaction was rolled back."
+  fi
+  log "Starting web and worker…"
+  s6-rc -u change web worker
+  return "$status"
+}
+
+cmd_psql() {
+  with_owner_pg psql -X
+}
+
+cmd_version() {
+  echo "OrcaSlicer $(cenv ORCA_VERSION)"
+  echo "Node $(node --version)"
+  echo "PostgreSQL $PG_MAJOR"
+  redis-server --version | head -n1
+  [ -f /etc/print-farm/version ] && cat /etc/print-farm/version
+  return 0
+}
+
+command=${1:-}
+[ $# -gt 0 ] && shift
+case "$command" in
+  health) cmd_health ;;
+  admin-password) cmd_admin_password ;;
+  seed-settings) cmd_seed_settings "$@" ;;
+  backup) cmd_backup ;;
+  restore) cmd_restore ;;
+  psql) cmd_psql ;;
+  version) cmd_version ;;
+  ""|-h|--help|help) usage ;;
+  *) usage >&2; exit 64 ;;
+esac
