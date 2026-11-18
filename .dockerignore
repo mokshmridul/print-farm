@@ -1,4 +1,5 @@
 .git
+.github
 .gitignore
 .env
 .env.*
@@ -14,6 +15,8 @@ node_modules
 
 data
 transfer
+backups
+.selfhost
 *.stl
 *.3mf
 *.obj

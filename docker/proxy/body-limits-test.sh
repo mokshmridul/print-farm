@@ -7,8 +7,9 @@
 # with no application log line to explain it, because the request never reaches
 # the app. That is exactly how the showcase photo upload shipped broken.
 #
-# Runs the REAL docker/proxy/nginx.conf against a stub upstream, so what is
-# asserted is the shipped configuration rather than a copy of it.
+# Renders the REAL docker/proxy/nginx.conf with the image's own renderer and runs
+# it against a stub upstream, so what is asserted is the shipped configuration
+# rather than a copy of it.
 set -euo pipefail
 
 NGINX_IMAGE="${NGINX_IMAGE:-nginx:alpine}"
@@ -19,25 +20,32 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 failures=0
 
+conf="$(mktemp -d)"
 cleanup() {
   docker rm -f "stub-$$" "proxy-$$" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
+  rm -rf "$conf"
 }
 trap cleanup EXIT
 
 docker network create --subnet "$SUBNET" "$NET" >/dev/null
 
-# Any response that is not nginx's own 413 proves the body reached the upstream.
-# The stub must not impose a limit of its own: nginx defaults to 1 MiB, which
-# would masquerade as the proxy rejecting a large-but-allowed body.
-docker run -d --name "stub-$$" --network "$NET" --network-alias web "$NGINX_IMAGE" \
-  sh -c 'printf "server{listen 3000;client_max_body_size 0;location /{return 204;}}" > /etc/nginx/conf.d/default.conf; exec nginx -g "daemon off;"' >/dev/null
+TRUSTED_PROXY_CIDR="$CLIENT_IP/32" \
+  "$repo/docker/rootfs/usr/local/lib/print-farm/render-nginx.sh" \
+  "$repo/docker/proxy/nginx.conf" "$conf/default.conf"
+chmod a+r "$conf/default.conf"
 
 docker run -d --name "proxy-$$" --network "$NET" \
-  -e TRUSTED_PROXY_CIDR="$CLIENT_IP/32" \
-  -v "$repo/docker/proxy/05-validate-trusted-proxy.sh:/docker-entrypoint.d/05-validate-trusted-proxy.sh:ro" \
-  -v "$repo/docker/proxy/nginx.conf:/etc/nginx/templates/default.conf.template:ro" \
+  -v "$conf/default.conf:/etc/nginx/conf.d/default.conf:ro" \
   "$NGINX_IMAGE" >/dev/null
+
+# The upstream is 127.0.0.1:3000 inside the image, so the stub shares the
+# proxy's network namespace. Any response that is not nginx's own 413 proves the
+# body reached the upstream. The stub must not impose a limit of its own: nginx
+# defaults to 1 MiB, which would masquerade as the proxy rejecting a
+# large-but-allowed body.
+docker run -d --name "stub-$$" --network "container:proxy-$$" "$NGINX_IMAGE" \
+  sh -c 'printf "pid /tmp/stub.pid; events{} http{server{listen 3000;client_max_body_size 0;location /{return 204;}}}" > /tmp/stub.conf; exec nginx -c /tmp/stub.conf -g "daemon off;"' >/dev/null
 
 # Wait for the listener, not for the config.
 #

@@ -2,15 +2,30 @@
 
 ## Overview
 
-Two long-running application containers and one short-lived migration task
-share a pnpm workspace:
+The whole shop ships as **one image** (`docker/Dockerfile`) and runs as one
+container. Under the s6-overlay supervisor it runs:
 
-- **web** (`apps/web`) — Next.js 15. Serves the UI and all API route handlers.
+- **init** (one-shot) — data-directory ownership, first-boot secrets, the
+  rendered PostgreSQL/Redis/nginx configuration, and the printer's slicing
+  profiles (`docker/rootfs/usr/local/lib/print-farm/init.sh`).
+- **PostgreSQL** and authenticated **Redis** (BullMQ ingest/slice queues, slice
+  cache coordination, rate limits, worker heartbeat), both on 127.0.0.1 only.
+- **migrate** (one-shot) — applies Prisma migrations and provisions separate
+  least-privilege web/worker database roles. web and worker start only after
+  it succeeds; if it fails, the container stops.
+- **web** (`apps/web`) — Next.js. Serves the UI and all API route handlers, as
+  the unprivileged `nextjs` user on 127.0.0.1:3000.
 - **worker** (`apps/worker`) — BullMQ consumers that inspect uploads, run
-  OrcaSlicer, render thumbnails, and perform the daily retention sweep.
-- **migrate** (one-shot target from the web Dockerfile) — applies Prisma
-  migrations and provisions separate least-privilege web/worker database roles.
-  Its psql client and schema-owner credential are absent from the public runner.
+  OrcaSlicer, render thumbnails, and perform the daily retention sweep. The
+  orchestrator runs as root so it can drop every Orca and parse job to its own
+  credential-free uid.
+- **nginx** — the only listener reachable from outside the container (:8080,
+  plain HTTP): per-route body limits, client-IP trust, log hygiene.
+
+Each process gets its environment built from scratch by its run script — an
+explicit allowlist — so the worker never sees the session secret, admin hash or
+provider keys, and the web never sees the worker's or owner's database
+credentials. The container's own environment snapshot is root-only.
 
 They share three workspace packages:
 
@@ -20,26 +35,23 @@ They share three workspace packages:
 - **`@print/geometry`** — a dependency-light parser for STL/3MF/OBJ/AMF that
   returns a triangle soup, bounding box and volume (no three.js in Node).
 
-Backing services: **PostgreSQL** (Prisma) and authenticated **Redis** (BullMQ
-ingest/slice queues, slice cache coordination, rate limits, worker heartbeat).
-
 ```
-          ┌────────── VPS host nginx (print.rish.pw, TLS) ──────────┐
-          │                    │ Tailscale                          │
-          ▼                    ▼                                     │
-     ┌─────────┐  8080   ┌──────────┐   ┌──────────┐                │
-     │  proxy  │────────▶│   web    │──▶│ postgres │                │
-     │ (nginx) │         │ (Next)   │   └──────────┘                │
-     └─────────┘         │          │──▶┌──────────┐  ◀── worker ───┘
-                         └──────────┘   │  redis   │
-                              ▲         └──────────┘        ▲
-                              │              ▲              │
-                              └── uploads ───┴── ingest/slice jobs ┘
-                                   volume          (BullMQ)
+   VPS host nginx (print.rish.pw, TLS)
+                │ Tailscale
+                ▼ :8080
+ ┌──────────────────────── print-farm container ─────────────────────────┐
+ │  nginx ──▶ web (Next, :3000) ──▶ PostgreSQL (:5432)                    │
+ │                 │                  ▲                                   │
+ │                 ▼                  │                                   │
+ │               Redis (:6379) ◀── worker ──▶ OrcaSlicer / parse jobs     │
+ │                 ingest/slice jobs     (own uid each, cleared env)     │
+ │                                                                        │
+ │  /data volume: postgres/ redis/ uploads/ pdfs/ secrets/ printer/      │
+ └────────────────────────────────────────────────────────────────────────┘
 ```
 
-Only the **proxy** publishes a port. The VPS host nginx terminates TLS for
-`print.rish.pw` and proxies to the compose proxy over Tailscale — see
+Only nginx listens outside the container. The VPS host nginx terminates TLS for
+`print.rish.pw` and proxies to it over Tailscale — see
 [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Request flows
@@ -109,11 +121,11 @@ The quote page requests a slice per model+settings via `POST /api/slices`:
    unique uid/gid, no capabilities, and a minimal explicit credential-free
    environment. Concurrent jobs cannot read each other's scratch directories
    or the upload vault. CPU, memory, and PID ceilings apply to the aggregate
-   worker container, while the slicer timeout applies per job.
+   container, while the slicer timeout applies per job.
    CI's source-run HTTP funnel replaces only the native Orca invocation with
    fixed synthetic measurements after this staging check. That process-level
    mode is refused outside explicit development/test environments and is never
-   forwarded by production Compose.
+   forwarded by the image's run scripts.
 4. Orca's `--pipe` JSON reports real `total_percent` progress. The worker stores
    that percentage and stage in PostgreSQL, while the client polls every 1.5 s.
 5. The worker parses `Metadata/slice_info.config` from the exported 3MF for

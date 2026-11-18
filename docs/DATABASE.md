@@ -50,8 +50,9 @@ DATABASE_URL=postgresql://print:print@localhost:5433/print \
 pnpm --filter @print/db generate
 ```
 
-Production does not migrate from the web process. Compose runs the same image
-in one-shot `migrate` mode with `MIGRATION_DATABASE_URL`, then provisions two
+Production does not migrate from the web process. On every start the image's
+one-shot `migrate` step (`docker/rootfs/usr/local/lib/print-farm/migrate.sh`)
+applies migrations as the schema owner `print_owner`, then provisions two
 distinct runtime roles:
 
 - web: application DML except `UploadedModel` insert and trusted slice-output
@@ -64,20 +65,20 @@ Upload row creation belongs exclusively to the FIFO ingest consumer. Moving
 database-enforced session-limit fence; the privilege is moved, not duplicated.
 
 Public database/schema creation is revoked. Web and worker start only after the
-migration service exits successfully. Every deployment reapplies grants so a
+migration step exits successfully. The owner is not a superuser; it holds
+superuser only while the runtime roles are (re)defined, before web and worker
+start. Every deployment reapplies grants so a
 new table is inaccessible until the provisioning allowlist is deliberately
 updated.
 
-```bash
-docker compose run --rm migrate
-```
+To rerun it, restart the container (`docker compose restart`).
 
 Review SQL before deploying. The role-provisioning task refuses shared roles,
 short/placeholder passwords, inherited roles, or runtime roles that own
 database objects.
 
-The generated Prisma engine target `debian-openssl-3.0.x` matches the Node 24
-Debian web image and Ubuntu worker runtime.
+Production runs PostgreSQL 18 (Ubuntu 26.04's), inside the image; development
+and CI use PostgreSQL 16, which this schema also supports.
 
 ## PII
 

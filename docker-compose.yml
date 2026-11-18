@@ -1,258 +1,96 @@
-# Production stack for print.rish.pw.
-# Only the proxy publishes a port; the VPS-host nginx proxies print.rish.pw to
-# it over Tailscale. Copy .env.example to .env and fill in secrets first.
+# print-farm: one container, one data volume.
 #
-#   docker compose up -d --build
+#   cp .env.example .env   # set APP_ORIGIN at least
+#   docker compose up -d
 #
-# Pinned so the Compose project (and its `print_*` named volumes) stays stable
+# The image (docker/Dockerfile) runs the web app, the slicing worker,
+# PostgreSQL, Redis and nginx under one supervisor. Only nginx listens outside
+# the container, on :8080, in plain HTTP: put HTTPS in front of it (your
+# reverse proxy, Cloudflare Tunnel, ...). See docs/DEPLOYMENT.md.
+#
+# `docker compose pull` fetches the published image; `docker compose build`
+# builds the same image from this checkout instead.
+#
+# Pinned so the Compose project (and its named volume) stays stable
 # regardless of the folder name the stack is launched from.
 name: print
 
 services:
-  proxy:
-    image: nginx:alpine@sha256:54f2a904c251d5a34adf545a72d32515a15e08418dae0266e23be2e18c66fefa
-    depends_on:
-      web:
-        condition: service_healthy
-    ports:
-      # Bound to loopback by default so the stack is never reachable from the
-      # host's public interfaces. Production sets PROXY_BIND in .env to the
-      # host's Tailscale IP so the VPS nginx can reach it over the tailnet —
-      # never 0.0.0.0 (see docs/DEPLOYMENT.md).
-      - "${PROXY_BIND:-127.0.0.1}:8080:8080"
-    environment:
-      # Only this exact transport peer may assert the real client IP. Startup
-      # rejects anything except one IPv4 host (/32 optional) or IPv6 host (/128
-      # optional); broad subnets and the former implicit default are forbidden.
-      # Nginx returns 403 to every other transport peer even if the host firewall
-      # is accidentally opened.
-      TRUSTED_PROXY_CIDR: ${TRUSTED_PROXY_CIDR:?Set TRUSTED_PROXY_CIDR to the exact outer proxy host}
-    volumes:
-      - ./docker/proxy/05-validate-trusted-proxy.sh:/docker-entrypoint.d/05-validate-trusted-proxy.sh:ro
-      - ./docker/proxy/nginx.conf:/etc/nginx/templates/default.conf.template:ro
-    networks:
-      - edge
-    read_only: true
-    tmpfs:
-      - /etc/nginx/conf.d:rw,nosuid,nodev,noexec,size=1m
-      - /var/cache/nginx:rw,nosuid,nodev,noexec,size=16m
-      - /var/run:rw,nosuid,nodev,noexec,size=1m
-    pids_limit: 128
-    mem_limit: 256m
-    memswap_limit: 256m
-    deploy:
-      resources:
-        limits:
-          cpus: "0.50"
-          memory: 256m
-          pids: 128
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - SETGID
-      - SETUID
-    restart: unless-stopped
-
-  web:
+  print-farm:
+    image: ${PRINT_IMAGE:-ghcr.io/mokshmridul/print-farm:latest}
     build:
       context: .
-      dockerfile: docker/web.Dockerfile
-      target: runner
+      dockerfile: docker/Dockerfile
+    ports:
+      # Bound to loopback by default so the shop is never reachable from the
+      # host's public interfaces. Set PROXY_BIND to the address your reverse
+      # proxy reaches this host on (a Tailscale IP, a LAN IP) — never 0.0.0.0
+      # for a public server.
+      - "${PROXY_BIND:-127.0.0.1}:${PROXY_PORT:-8080}:8080"
     environment:
-      # Explicit allowlist: never pass the migration-owner/worker credentials,
-      # standalone server-password variables, or unrelated host settings here.
-      # The web role and Redis credentials remain scoped inside their URLs.
-      APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN}
-      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
-      UPLOAD_DIR: /data/uploads
-      PDF_DIR: /data/pdfs
-      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379
-      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET}
-      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:?Set ADMIN_PASSWORD_HASH}
+      # The public address customers use (https://…). Plain http is accepted
+      # only for localhost and private-network addresses.
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
+      # One host that may assert the client address (your proxy as seen from
+      # inside the container). Empty: trust none, serve every peer. Set: every
+      # other peer gets 403. REAL_IP_HEADER: X-Real-IP or CF-Connecting-IP.
+      TRUSTED_PROXY_CIDR: ${TRUSTED_PROXY_CIDR:-}
+      REAL_IP_HEADER: ${REAL_IP_HEADER:-X-Real-IP}
+      # Admin login. Empty everywhere: a password is generated on first boot and
+      # printed once in `docker compose logs`. ADMIN_PASSWORD is hashed on first
+      # boot only; change it later with `docker compose exec print-farm print-farm admin-password`.
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # Normally generated and kept in the volume. Pin it only when moving an
+      # existing install (settings sealed with the old one stay readable).
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      # Printer: unset = the hand-tuned Bambu Lab A1 profiles. Otherwise an
+      # exact OrcaSlicer machine preset (docker/selfhost/printers.tsv).
+      PRINTER_MACHINE: ${PRINTER_MACHINE:-}
+      PRINTER_MULTI_MATERIAL: ${PRINTER_MULTI_MATERIAL:-0}
+      ADVANCED_PROFILES: ${PRINTER_ADVANCED:-0}
+      PRINTER_DISPLAY_NAME: ${PRINTER_DISPLAY_NAME:-}
+      # Integrations (optional).
       WHATSAPP_NUMBER: ${WHATSAPP_NUMBER:-}
       CONTACT_EMAIL: ${CONTACT_EMAIL:-}
       GOOGLE_MAPS_EMBED_URL: ${GOOGLE_MAPS_EMBED_URL:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       MAIL_TO: ${MAIL_TO:-}
-      CONTACT_FROM: "${CONTACT_FROM:-print.rish.pw <contact@rish.pw>}"
+      CONTACT_FROM: ${CONTACT_FROM:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       TELEGRAM_MESSAGE_THREAD_ID: ${TELEGRAM_MESSAGE_THREAD_ID:-}
       SHIPROCKET_EMAIL: ${SHIPROCKET_EMAIL:-}
       SHIPROCKET_PASSWORD: ${SHIPROCKET_PASSWORD:-}
-      SHIPROCKET_PICKUP_PINCODE: ${SHIPROCKET_PICKUP_PINCODE:-781001}
-      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-300}
-      MAX_SESSION_UPLOAD_MB: ${MAX_SESSION_UPLOAD_MB:-900}
-      UPLOAD_WINDOW_MB: ${UPLOAD_WINDOW_MB:-900}
-      DOWNLOAD_WINDOW_MB: ${DOWNLOAD_WINDOW_MB:-1200}
-      STORAGE_RESERVE_MB: ${STORAGE_RESERVE_MB:-2048}
-      MAX_MODELS_PER_SESSION: ${MAX_MODELS_PER_SESSION:-20}
-      # The same retention the worker sweeps with, so admin and the FAQ show it
-      # until admin -> Settings -> File clean-up is saved.
-      UPLOAD_RETENTION_HOURS: ${UPLOAD_RETENTION_HOURS:-48}
-      FILE_RETENTION_DAYS: ${FILE_RETENTION_DAYS:-30}
-      QUOTATION_RETENTION_DAYS: ${QUOTATION_RETENTION_DAYS:-90}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
+      SHIPROCKET_PICKUP_PINCODE: ${SHIPROCKET_PICKUP_PINCODE:-}
+      # Limits and retention (defaults apply when empty).
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-}
+      MAX_SESSION_UPLOAD_MB: ${MAX_SESSION_UPLOAD_MB:-}
+      UPLOAD_WINDOW_MB: ${UPLOAD_WINDOW_MB:-}
+      DOWNLOAD_WINDOW_MB: ${DOWNLOAD_WINDOW_MB:-}
+      STORAGE_RESERVE_MB: ${STORAGE_RESERVE_MB:-}
+      MAX_MODELS_PER_SESSION: ${MAX_MODELS_PER_SESSION:-}
+      UPLOAD_RETENTION_HOURS: ${UPLOAD_RETENTION_HOURS:-}
+      FILE_RETENTION_DAYS: ${FILE_RETENTION_DAYS:-}
+      QUOTATION_RETENTION_DAYS: ${QUOTATION_RETENTION_DAYS:-}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-}
+      SLICE_TIMEOUT_SECONDS: ${SLICE_TIMEOUT_SECONDS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-}
     volumes:
-      - uploads:/data/uploads
-      - pdfs:/data/pdfs
-    networks:
-      - edge
-      - backend
-    read_only: true
-    tmpfs:
-      - /tmp:rw,nosuid,nodev,noexec,size=256m,mode=1777
-    pids_limit: 256
-    mem_limit: 2g
-    memswap_limit: 2g
-    init: true
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 2g
-          pids: 256
-    healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 40s
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    restart: unless-stopped
-
-  # Runs with the schema-owner credential, then exits. Long-running services
-  # receive separate roles whose table grants are provisioned by this task.
-  migrate:
-    build:
-      context: .
-      dockerfile: docker/web.Dockerfile
-      target: migrate
-    command: ["migrate"]
-    environment:
-      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?Set MIGRATION_DATABASE_URL}
-      WEB_DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
-      WORKER_DATABASE_URL: ${WORKER_DATABASE_URL:?Set WORKER_DATABASE_URL}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - backend
-    read_only: true
-    tmpfs:
-      - /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777
-    pids_limit: 128
-    mem_limit: 512m
-    memswap_limit: 512m
-    deploy:
-      resources:
-        limits:
-          cpus: "1"
-          memory: 512m
-          pids: 128
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    restart: "no"
-
-  worker:
-    build:
-      context: .
-      dockerfile: docker/worker.Dockerfile
-    # Deliberately NOT env_file: the worker spawns OrcaSlicer on untrusted
-    # uploads, so its environment carries only what the trusted orchestrator
-    # reads (see apps/worker/src/config.ts) - never SESSION_SECRET, the admin
-    # hash, or API keys. Telegram alerts remain in the web service, which
-    # observes this worker's Redis heartbeat; do not add an edge network or
-    # provider credentials here. Orca runs under a different uid with a cleared
-    # environment and cannot read the orchestrator's /proc environment.
-    environment:
-      DATABASE_URL: ${WORKER_DATABASE_URL:?Set WORKER_DATABASE_URL}
-      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379
-      REDISCLI_AUTH: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
-      UPLOAD_DIR: /data/uploads
-      PDF_DIR: /data/pdfs
-      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
-      SLICE_TIMEOUT_SECONDS: ${SLICE_TIMEOUT_SECONDS:-600}
-      THUMB_SIZE: ${THUMB_SIZE:-512}
-      UPLOAD_RETENTION_HOURS: ${UPLOAD_RETENTION_HOURS:-48}
-      FILE_RETENTION_DAYS: ${FILE_RETENTION_DAYS:-30}
-      QUOTATION_RETENTION_DAYS: ${QUOTATION_RETENTION_DAYS:-90}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      SLICER_UID: 1002
-      SLICER_GID: 3000
-      STORAGE_UID: 1001
-      STORAGE_GID: 1001
-      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-300}
-      MAX_SESSION_UPLOAD_MB: ${MAX_SESSION_UPLOAD_MB:-900}
-      MAX_MODELS_PER_SESSION: ${MAX_MODELS_PER_SESSION:-20}
-      STORAGE_RESERVE_MB: ${STORAGE_RESERVE_MB:-2048}
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-    volumes:
-      - uploads:/data/uploads
-      - pdfs:/data/pdfs
-    networks:
-      - backend
-    user: "0:0"
-    read_only: true
-    tmpfs:
-      - /tmp:rw,nosuid,nodev,noexec,size=3g,mode=1777
-    pids_limit: 256
-    # Three consumers share this cgroup and can peak together:
-    #   - /tmp, a 3 GB tmpfs, charged here in full;
-    #   - OrcaSlicer, past 4 GB RSS on ~220 MB STLs (OOM-killed at 97% on
-    #     2026-07-15);
-    #   - the parse child, up to ~3.4 GB building an xmldom tree for a model at
-    #     the MAX_XML_ELEMENTS ceiling (a 1.26M triangle 3MF measures 3.2 GB).
-    # Ingest and slice are separate BullMQ workers in one process, so a parse
-    # and a slice do overlap. 8g could not cover that sum once 3MF models this
-    # large became parseable. The parse child runs under `choom -n 1000`, so if
-    # the sum is still exceeded the kernel reaps it first and the customer gets
-    # a parse error rather than the worker dying mid-slice.
-    mem_limit: 12g
-    memswap_limit: 12g
+      - data:/data
+    # OrcaSlicer passes 4 GB RSS on ~220 MB STLs, and a parse of a model at the
+    # MAX_XML_ELEMENTS ceiling can take ~3.4 GB while a slice runs; the database,
+    # web and Redis share this limit too. Slicer and parse children run under
+    # `choom -n 1000`, so if it is exceeded the kernel reaps them first and the
+    # customer gets a slice/parse error rather than the database being killed.
+    mem_limit: ${PRINT_MEMORY:-12g}
+    memswap_limit: ${PRINT_MEMORY:-12g}
+    pids_limit: 1024
     ulimits:
       core: 0
-    init: true
-    healthcheck:
-      # The worker refreshes worker:heartbeat (TTL 30s) while alive.
-      test: ["CMD-SHELL", "[ \"$(redis-cli -h redis exists worker:heartbeat)\" = \"1\" ]"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 40s
-    deploy:
-      resources:
-        limits:
-          cpus: "4"
-          memory: 12g
-          pids: 256
-    # The trusted orchestrator gets only the capabilities needed to maintain
-    # storage ownership, reap escaped child processes, and switch each Orca job
-    # to a private uid/gid. setpriv removes every child capability before the
-    # native parser starts.
-    security_opt:
-      - no-new-privileges:true
+    # The worker's orchestrator needs the default capability set (chown, setuid/
+    # setgid, kill, setpcap) to drop every OrcaSlicer job to its own uid;
+    # everything not needed is dropped.
     cap_drop:
       - ALL
     cap_add:
@@ -263,92 +101,17 @@ services:
       - SETGID
       - SETPCAP
       - SETUID
-    restart: unless-stopped
-
-  postgres:
-    image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    networks:
-      - backend
-    read_only: true
-    tmpfs:
-      - /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777
-      - /var/run/postgresql:rw,nosuid,nodev,noexec,size=16m
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-    restart: unless-stopped
-    pids_limit: 256
-    mem_limit: 2g
-    memswap_limit: 2g
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 2g
-          pids: 256
     security_opt:
       - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - DAC_OVERRIDE
-      - FOWNER
-      - SETGID
-      - SETUID
-
-  redis:
-    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD}"]
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
-    volumes:
-      - redisdata:/data
-    networks:
-      - backend
+    # Everything written lives in /data (durable) or these tmpfs mounts: /run
+    # holds the supervisor's state, sockets and rendered configs; /tmp the
+    # slicer's per-job copies of customer models, which never touch disk.
     read_only: true
     tmpfs:
-      - /tmp:rw,nosuid,nodev,noexec,size=32m,mode=1777
-    healthcheck:
-      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli ping >/dev/null"]
-      interval: 10s
-      timeout: 3s
-      retries: 10
+      - /run:rw,nosuid,nodev,exec,size=64m,mode=0755
+      - /tmp:rw,nosuid,nodev,noexec,size=${PRINT_TMP_SIZE:-3g},mode=1777
+    stop_grace_period: 40s
     restart: unless-stopped
-    pids_limit: 128
-    mem_limit: 512m
-    memswap_limit: 512m
-    deploy:
-      resources:
-        limits:
-          cpus: "1"
-          memory: 512m
-          pids: 128
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - DAC_OVERRIDE
-      - SETGID
-      - SETUID
 
 volumes:
-  pgdata:
-  redisdata:
-  uploads:
-  pdfs:
-
-networks:
-  edge:
-  backend:
-    internal: true
+  data:

@@ -4,41 +4,52 @@ Copy `.env.example` to `.env`, fill in values, and run `chmod 0600 .env`.
 Production secrets have no usable defaults and are validated before startup.
 Passwords embedded in URLs must be percent-encoded.
 
-## Core and database roles
+## Core
 
 | Variable | Required | Default | Notes |
 | --- | --- | --- | --- |
-| `APP_ORIGIN` | production | local HTTP origin | Exact public origin used for CSRF, cookies, CSP/HSTS, and generated links. Production requires HTTPS and no path/query. |
-| `PROXY_BIND` | deployment | `127.0.0.1` | Host address for compose port 8080. Use only the private address reached by the public proxy; never `0.0.0.0`. |
-| `TRUSTED_PROXY_CIDR` | compose | none | Required exact transport source allowed to assert client IP/scheme. Accepts one IPv4 host (no prefix or `/32`) or unbracketed IPv6 host (no prefix or `/128`); startup rejects subnets, lists, hostnames, and invalid/config syntax. |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | compose | none | Schema owner created by the Postgres image. Use a long random owner password. |
-| `MIGRATION_DATABASE_URL` | production | none | Schema-owner URL used only by the short-lived `migrate` service. |
-| `DATABASE_URL` | yes | none | Distinct `print_web`-style runtime URL. The migration task provisions broad business-table DML, column-scoped `SliceResult` writes that exclude slicer measurements/raw metadata, and no DDL rights. |
-| `WORKER_DATABASE_URL` | compose | none | Distinct worker runtime URL. It receives only model/slice/retention table grants. |
-| `REDIS_PASSWORD` | compose | none | Long random Redis server password. |
-| `REDIS_URL` | local/non-compose | local Redis | Authenticated Redis URL. Compose constructs service-specific URLs from `REDIS_PASSWORD`. |
-
-Migration, web, and worker database usernames and passwords must all be
-different and each password must be at least 32 bytes. On every deployment the
-migration task reapplies least-privilege grants before long-running services
-start.
+| `APP_ORIGIN` | production | `http://localhost:8080` | Exact public origin used for CSRF, cookies, CSP/HSTS, and generated links. HTTPS unless it is localhost or a private-network address; no path/query. |
+| `PRINT_IMAGE` | compose | `ghcr.io/mokshmridul/print-farm:latest` | Image to run. Every commit on main is published as `:sha-<7 hex>` too. |
+| `PROXY_BIND` / `PROXY_PORT` | compose | `127.0.0.1` / `8080` | Host address and port the container's :8080 is published on. Use only the private address reached by the public proxy; never `0.0.0.0` on a public server. |
+| `TRUSTED_PROXY_CIDR` | behind a proxy | empty | The one transport source allowed to assert the client IP/scheme: one IPv4 host (no prefix or `/32`) or unbracketed IPv6 host (no prefix or `/128`); startup rejects subnets, lists, hostnames, and invalid/config syntax. Empty: nothing is trusted and every peer is served as itself. |
+| `REAL_IP_HEADER` | no | `X-Real-IP` | Where that forwarder puts the client address: `X-Real-IP` or `CF-Connecting-IP`. |
+| `PRINT_MEMORY` / `PRINT_TMP_SIZE` | compose | `12g` / `3g` | Memory ceiling for the whole container, and the in-memory `/tmp` the slicer stages models in. |
 
 Despite its historical name, `TRUSTED_PROXY_CIDR` is deliberately a single-host
 allowlist, not a network. It must match the outer proxy's transport address as
-shown by the compose proxy's `peer=` access-log field. Firewall port 8080 to the
-same source; compose nginx also returns 403 to every other transport peer. The
-compose proxy overwrites `X-Real-IP` and `X-Forwarded-For` and passes the original
-transport peer internally as `X-Proxy-Peer-IP`.
+the container sees it — the `peer=` field of its nginx access log. Firewall the
+published port to the same source; the container's nginx also returns 403 to
+every other transport peer. It overwrites `X-Real-IP` and `X-Forwarded-For` and
+passes the original transport peer internally as `X-Proxy-Peer-IP`.
+
+### Generated inside the container
+
+`DATABASE_URL`, `REDIS_URL` and the worker's and schema owner's database URLs
+are not configured: on first boot the container generates a distinct 64-hex
+password for the schema owner (`print_owner`), the web role (`print_web`), the
+worker role (`print_worker`) and Redis, keeps them root-only in `/data/secrets`,
+and builds each process's URLs from them. Every start re-applies the role
+passwords and least-privilege grants before web and worker run.
 
 ## Session/admin secrets
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `SESSION_SECRET` | yes | At least 32 random bytes; signs purpose-separated quote, admin, and shipping tokens. Generate with `openssl rand -hex 32`. |
-| `ADMIN_PASSWORD_HASH` | yes | Generate with the prompt-only `pnpm --filter @print/web hash-password`. Input must have at least 12 characters and at most 72 UTF-8 bytes. |
+| `SESSION_SECRET` | no | Generated in `/data/secrets/session-secret` when unset. Pin it (at least 32 random bytes) only to keep an existing install's value. Signs purpose-separated quote, admin, and shipping tokens. |
+| `ADMIN_PASSWORD` | no | Hashed on first boot only, never stored in plain text. |
+| `ADMIN_PASSWORD_HASH` | no | A pinned bcrypt hash (cost 12+); takes precedence over the hash kept in the volume. Without either, a password is generated and printed once in the first boot's log. Change the kept one with `print-farm admin-password`. |
 
-Docker Compose interpolates `$` in `.env`; double every `$` in the bcrypt hash
-to `$$`. The container receives the intended single-dollar value.
+Docker Compose interpolates `$` in `.env`: put a pinned bcrypt hash in single
+quotes (`ADMIN_PASSWORD_HASH='$2a$12$…'`), or double every `$` to `$$`.
+
+## Printer
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `PRINTER_MACHINE` | unset | Unset: the committed, hand-tuned Bambu Lab A1 profiles. Otherwise an exact OrcaSlicer machine preset (`docker/selfhost/printers.tsv`); `init` generates its profiles into `/data/printer` and regenerates them when the choice or OrcaSlicer changes. |
+| `PRINTER_MULTI_MATERIAL` | `0` | `1` for an AMS/MMU/tool changer (automatic multicolour). |
+| `PRINTER_ADVANCED` (`ADVANCED_PROFILES` in the container) | `0` | `1`: the owner uploads OrcaSlicer presets in admin → Slicer profiles. |
+| `PRINTER_DISPLAY_NAME` | | The printer's name in customer copy. |
 
 ## Business and third-party services
 
@@ -61,8 +72,8 @@ one. Review vendor retention/access terms before enabling it.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `UPLOAD_DIR` | `./data/uploads` | Model/thumbnail vault (`/data/uploads` in Compose). |
-| `PDF_DIR` | `./data/pdfs` | Quotation PDF vault (`/data/pdfs` in Compose). |
+| `UPLOAD_DIR` | `./data/uploads` | Model/thumbnail vault (fixed at `/data/uploads` in the image). |
+| `PDF_DIR` | `./data/pdfs` | Quotation PDF vault (fixed at `/data/pdfs` in the image). |
 | `MAX_UPLOAD_MB` | `300` | Per-file limit; values above the hard 300 MiB cap are reduced to 300. |
 | `MAX_SESSION_UPLOAD_MB` | `900` | Persistent active-upload bytes per anonymous quote session. |
 | `UPLOAD_WINDOW_MB` | `900` | Accepted upload bytes per observed IP per 10 minutes. |
@@ -102,17 +113,25 @@ not deployment tuning knobs.
 
 ## Process exposure
 
-- `migrate`: only the owner URL plus the two runtime URLs; exits after migrations
-  and grants.
+Each process inside the container gets an environment built from scratch by
+its run script (`docker/rootfs/usr/local/lib/print-farm/*-run.sh`); values are
+exported, never placed on a command line. The container's own environment
+snapshot (`/run/s6/container_environment`) is readable by root only.
+
+- `migrate`: only the owner URL plus the two runtime URLs; exits after
+  migrations and grants. The owner holds superuser only for the provisioning
+  step, while web and worker are not running.
 - `web`: explicit allowlist of its runtime DB URL, Redis URL, session/admin and
   configured provider secrets, and web quota settings. It never receives the
-  migration/worker database URLs or the PostgreSQL owner password.
+  migration/worker database URLs or any owner password.
 - `worker`: worker DB URL, authenticated Redis URL, storage paths, and worker
-  knobs only. It receives no session/admin/provider secrets or internet-facing
-  network. Heartbeat alerting is observed and sent by web. Each Orca process
-  gets a private model copy and a minimal explicit, credential-free environment
-  containing only process basics such as `PATH`, locale, `HOME`, and
-  `XDG_RUNTIME_DIR`. Compose CPU, memory, and PID limits apply to the whole
-  worker container and all concurrent slicers, not individually to each Orca
-  process; the slicer timeout is per job. Production Compose does not forward
-  `STUB_SLICER`.
+  knobs only. It receives no session/admin/provider secrets. Heartbeat alerting
+  is observed and sent by web. Each Orca process gets a private model copy and
+  a minimal explicit, credential-free environment containing only process
+  basics such as `PATH`, locale, `HOME`, and `XDG_RUNTIME_DIR`, under its own
+  uid, which can read neither `/data`, `/data/secrets`, the environment
+  snapshot nor another process's environment. The container's memory and PID
+  limits apply to everything in it — database and web included — not
+  individually to each Orca process; slicer and parse children run under
+  `choom -n 1000` so the kernel reaps them first. The slicer timeout is per
+  job. `STUB_SLICER` is never forwarded.

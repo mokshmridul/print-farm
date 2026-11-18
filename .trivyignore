@@ -1,0 +1,10 @@
+# DS-0002 — "Specify at least 1 USER command with non-root user".
+# docker/Dockerfile starts the s6-overlay supervisor (/init) as root, which it
+# requires. Root is kept only by the supervisor, nginx's master and the slicing
+# worker's orchestrator (which, as in the old compose stack's `user: "0:0"`,
+# drops every OrcaSlicer/parse job to its own credential-free uid). The web
+# runs as nextjs, PostgreSQL as postgres, Redis as redis, nginx workers as
+# www-data; docker-compose.yml drops all capabilities but the seven the
+# orchestrator needs, sets no-new-privileges and a read-only root filesystem.
+DS-0002
+AVD-DS-0002

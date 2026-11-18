@@ -5,7 +5,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/zappymussel380/print.rish.pw/main/install.sh | sudo bash
 #
 # It asks for your shop's name, web address, rates, materials and contact
-# details, then builds and starts everything. Run it again from the install
+# details, then downloads the print-farm image and starts it: one container
+# with everything inside (web, slicer, database). Run it again from the install
 # folder (sudo ./install.sh) to change the web address, admin password or
 # integrations, reset the shop settings, or uninstall. Update with:
 #
@@ -122,7 +123,7 @@ preflight() {
   if [ "$mem_gb" -ge 7 ]; then ok "${mem_gb} GB memory"
   else warn "${mem_gb} GB memory — 8 GB is recommended; big models may fail to slice."; fi
   if [ "$disk_gb" -ge 25 ]; then ok "${disk_gb} GB free disk"
-  else warn "${disk_gb} GB free disk — 25 GB is recommended (the slicer image alone is ~3 GB)."; fi
+  else warn "${disk_gb} GB free disk — 25 GB is recommended (the image alone is ~3 GB)."; fi
   if [ "$cpus" -ge 2 ]; then ok "${cpus} CPU cores"
   else warn "1 CPU core — slicing will be slow."; fi
   assert_project_is_ours
@@ -240,118 +241,102 @@ pick_listed_printer() {
 site_url() {
   local mode=${ANS[MODE]:-${CFG[SELFHOST_MODE]:-}}
   if [ "$mode" = local ]; then
-    local host=${ANS[LOCAL_BIND]:-${CFG[LOCAL_BIND]:-127.0.0.1}}
+    local host=${ANS[PROXY_BIND]:-${CFG[PROXY_BIND]:-127.0.0.1}}
     [ "$host" = 127.0.0.1 ] && host=localhost
-    echo "http://$host:${ANS[LOCAL_PORT]:-${CFG[LOCAL_PORT]:-8000}}"
+    echo "http://$host:${ANS[PROXY_PORT]:-${CFG[PROXY_PORT]:-8080}}"
   else
     echo "https://${ANS[DOMAIN]:-${CFG[SELFHOST_DOMAIN]:-}}"
   fi
 }
 
+# The shop serves plain HTTP on one port; HTTPS is always something in front
+# of it. Three ways to set that up.
 sec_address() {
   head_line "Web address"
   say "  How will people reach the site?"
-  say "   1) This server has a public IP and ports 80/443 are free  ${C_DIM}(recommended — automatic HTTPS)${C_OFF}"
-  say "   2) It's at home / behind a router — use a free Cloudflare Tunnel  ${C_DIM}(no port forwarding)${C_OFF}"
-  say "   3) I already run my own reverse proxy (nginx, Nginx Proxy Manager, Traefik…)"
-  say "   4) Try it on this computer or your home network first  ${C_DIM}(plain http — nothing on the internet can reach it; go live later)${C_OFF}"
-  say "   5) I already have a Cloudflare Tunnel for other things — add this site to it"
+  say "   1) Try it on this computer or your home network first  ${C_DIM}(plain http — nothing on the internet can reach it; go live later)${C_OFF}"
+  say "   2) Through my own reverse proxy that handles HTTPS  ${C_DIM}(nginx, Nginx Proxy Manager, Traefik, Caddy…)${C_OFF}"
+  say "   3) Through a Cloudflare Tunnel  ${C_DIM}(cloudflared; no open ports needed)${C_OFF}"
   local current=1
-  case "${CFG[SELFHOST_MODE]:-}" in tunnel) current=2 ;; proxy) current=3 ;; local) current=4 ;; owntunnel) current=5 ;; esac
-  ask MODE_CHOICE "Choose 1–5" "$current" valid_mode_choice "Please answer 1, 2, 3, 4 or 5."
+  case "${CFG[SELFHOST_MODE]:-}" in proxy) current=2 ;; tunnel|owntunnel) current=3 ;; esac
+  ask MODE_CHOICE "Choose 1–3" "$current" valid_mode_choice "Please answer 1, 2 or 3."
+  ANS[TRUSTED_PROXY]=""
+  ANS[REAL_IP_HEADER]=X-Real-IP
   case "${ANS[MODE_CHOICE]}" in
-    4|local) ;;
-    *)
+    1|local)
+      ANS[MODE]=local
+      ANS[DOMAIN]=localhost
+      sec_local_access
+      ask PROXY_PORT "Port to open it on" "${CFG[PROXY_PORT]:-8080}" valid_local_port "Pick a free port between 1024 and 65535."
+      check_local_port_free "${ANS[PROXY_PORT]}" ;;
+    2|proxy|3|tunnel|owntunnel)
+      if [[ "${ANS[MODE_CHOICE]}" =~ ^(2|proxy)$ ]]; then ANS[MODE]=proxy; else ANS[MODE]=tunnel; fi
       hint "You need a domain (e.g. print.example.com) — a public site only runs over HTTPS."
       # Coming from local test mode the stored "domain" is localhost — no default then.
       local domain_default=${CFG[SELFHOST_DOMAIN]:-}
       [ "${CFG[SELFHOST_MODE]:-}" = local ] && domain_default=""
-      ask DOMAIN "Domain name" "$domain_default" valid_domain "Enter just the domain, like print.example.com (no https://)." ;;
-  esac
-  case "${ANS[MODE_CHOICE]}" in
-    1|caddy)
-      ANS[MODE]=caddy
-      ask ACME_EMAIL "Email for Let's Encrypt certificate notices (optional)" "${CFG[SELFHOST_ACME_EMAIL]:-}" valid_email_or_empty "That doesn't look like an email address."
-      check_ports_free
-      check_dns "${ANS[DOMAIN]}" ;;
-    2|tunnel)
-      ANS[MODE]=tunnel
+      ask DOMAIN "Domain name" "$domain_default" valid_domain "Enter just the domain, like print.example.com (no https://)."
+      sec_forwarder_access
+      ask PROXY_PORT "Port for it to connect to" "${CFG[PROXY_PORT]:-8080}" valid_local_port "Pick a free port between 1024 and 65535."
+      check_local_port_free "${ANS[PROXY_PORT]}"
       say ""
-      say "  In the Cloudflare dashboard (your domain must use Cloudflare DNS):"
-      say "   1. Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared. Name it anything."
-      say "   2. Copy the token from the install command it shows (the long string after --token)."
-      say "   3. Public hostname: ${C_BOLD}${ANS[DOMAIN]}${C_OFF} → Service type ${C_BOLD}HTTP${C_OFF}, URL ${C_BOLD}caddy:80${C_OFF}"
-      if [ -n "${CFG[CLOUDFLARE_TUNNEL_TOKEN]:-}" ] && ! unattended && confirm "Keep the existing tunnel token $(mask "${CFG[CLOUDFLARE_TUNNEL_TOKEN]}")?" Y; then
-        ANS[TUNNEL_TOKEN]="${CFG[CLOUDFLARE_TUNNEL_TOKEN]}"
+      if [ "${ANS[MODE]}" = proxy ]; then
+        say "  Point your reverse proxy at ${C_BOLD}http://${ANS[PROXY_BIND]}:${ANS[PROXY_PORT]}${C_OFF}. It must terminate HTTPS for"
+        say "  ${ANS[DOMAIN]}, OVERWRITE X-Real-IP with the visitor's address, and allow request"
+        say "  bodies up to 301 MB on /api/uploads. Full nginx example: docs/DEPLOYMENT.md"
       else
-        ask_secret TUNNEL_TOKEN "Tunnel token (input hidden)" valid_tunnel_token "That doesn't look like a tunnel token (a long base64 string)."
-      fi
-      warn "Cloudflare limits uploads to 100 MB per file, so model uploads are capped at 95 MB in this mode." ;;
-    3|proxy)
-      ANS[MODE]=proxy
-      hint "Your proxy must terminate HTTPS for ${ANS[DOMAIN]} and forward to this server's port 8080."
-      ask PROXY_IP "IP address your proxy connects FROM (exactly one host)" "${CFG[TRUSTED_PROXY_CIDR]:-}" valid_ipv4 "Enter one IPv4 address, like 192.168.1.20."
-      ask PROXY_BIND "Address on THIS server to listen on for it (never 0.0.0.0)" "${CFG[PROXY_BIND]:-127.0.0.1}" valid_bind_address "Enter one IPv4 address of this server (not 0.0.0.0)." ;;
-    4|local)
-      ANS[MODE]=local
-      ANS[DOMAIN]=localhost
-      sec_local_access
-      ask LOCAL_PORT "Port to open it on" "${CFG[LOCAL_PORT]:-8000}" valid_local_port "Pick a free port between 1024 and 65535 (8080 is taken by the site itself)."
-      check_local_port_free "${ANS[LOCAL_PORT]}" ;;
-    5|owntunnel)
-      ANS[MODE]=owntunnel
-      sec_own_tunnel_access
-      ask LOCAL_PORT "Port for your tunnel to connect to" "${CFG[LOCAL_PORT]:-8000}" valid_local_port "Pick a free port between 1024 and 65535 (8080 is taken by the site itself)."
-      check_local_port_free "${ANS[LOCAL_PORT]}"
-      say ""
-      say "  In the Cloudflare dashboard, open your tunnel (Zero Trust → Networks → Tunnels) and add a"
-      say "  public hostname: ${C_BOLD}${ANS[DOMAIN]}${C_OFF} → Service type ${C_BOLD}HTTP${C_OFF}, URL ${C_BOLD}${ANS[LOCAL_BIND]}:${ANS[LOCAL_PORT]}${C_OFF}"
-      hint "Your cloudflared keeps running as it is; nothing else in it changes."
-      warn "Cloudflare limits uploads to 100 MB per file, so model uploads are capped at 95 MB in this mode." ;;
+        ANS[REAL_IP_HEADER]=CF-Connecting-IP
+        say "  In the Cloudflare dashboard (Zero Trust → Networks → Tunnels), add a public hostname to your tunnel:"
+        say "  ${C_BOLD}${ANS[DOMAIN]}${C_OFF} → Service type ${C_BOLD}HTTP${C_OFF}, URL ${C_BOLD}${ANS[PROXY_BIND]}:${ANS[PROXY_PORT]}${C_OFF}"
+        hint "No tunnel yet? Create one there and install cloudflared as it shows (on this server is simplest)."
+        warn "Cloudflare limits uploads to 100 MB per file, so model uploads are capped at 95 MB in this mode."
+      fi ;;
   esac
 }
+valid_mode_choice() { [[ "$1" =~ ^(1|2|3|local|proxy|tunnel)$ ]]; }
 
-# Own-tunnel mode: where the owner's cloudflared connects from. Caddy listens on
-# that one address alone, and only for the tunnel — visitors come in over HTTPS
-# at the domain.
-sec_own_tunnel_access() {
-  local lan stored="" access_default=1
-  lan=$(lan_address)
-  if [ "${CFG[SELFHOST_MODE]:-}" = owntunnel ] && [ -n "${CFG[LOCAL_BIND]:-}" ] && [ "${CFG[LOCAL_BIND]}" != 127.0.0.1 ]; then
-    stored=${CFG[LOCAL_BIND]}
-    access_default=2
-  fi
+# Where the reverse proxy / cloudflared runs, which decides the address the
+# shop listens on and the one forwarder it trusts to name the visitor.
+sec_forwarder_access() {
+  local what="your reverse proxy" access_default=1
+  [ "${ANS[MODE]}" = tunnel ] && what="cloudflared"
+  if [ -n "${CFG[PROXY_BIND]:-}" ] && [ "${CFG[PROXY_BIND]}" != 127.0.0.1 ] && [ "${CFG[SELFHOST_MODE]:-}" != local ]; then access_default=2; fi
   say ""
-  say "  Where does your cloudflared run?"
-  say "   1) On this computer, installed directly (not in Docker)"
-  say "   2) In Docker, or on another computer on this network"
-  ask TUNNEL_ACCESS "Choose 1–2" "$access_default" valid_tunnel_access "Please answer 1 or 2."
-  case "${ANS[TUNNEL_ACCESS]}" in
-    2|network)
-      if [ -z "$lan" ] && [ -z "$stored" ]; then
-        die "This computer has no home-network address (10.x, 172.16–31.x or 192.168.x) for cloudflared to reach."
-      fi
-      ask LOCAL_ADDRESS "This computer's address on your network" "${stored:-$lan}" valid_lan_address \
-        "Enter one of this computer's own private addresses: $(private_ipv4s | paste -sd' ' -)."
-      ANS[LOCAL_BIND]=${ANS[LOCAL_ADDRESS]} ;;
+  say "  Where does $what run?"
+  say "   1) On this server, installed directly (not in Docker)"
+  say "   2) In Docker, or on another computer"
+  ask FORWARDER_ACCESS "Choose 1–2" "$access_default" valid_forwarder_access "Please answer 1 or 2."
+  case "${ANS[FORWARDER_ACCESS]}" in
+    2|other)
+      ask PROXY_BIND "Address on THIS server for it to connect to (never 0.0.0.0)" "${CFG[PROXY_BIND]:-$(lan_address)}" valid_bind_address \
+        "Enter one IPv4 address of this server (not 0.0.0.0)."
+      local stored=""
+      [ "${CFG[TRUSTED_PROXY_CIDR]:-}" != "${CFG[PRINT_GATEWAY]:-x}" ] && stored=${CFG[TRUSTED_PROXY_CIDR]:-}
+      hint "The shop only believes the visitor address from this one machine; everything else is refused."
+      ask PROXY_IP "IP address $what connects FROM (exactly one host)" "$stored" valid_ipv4 "Enter one IPv4 address, like 192.168.1.20."
+      ANS[TRUSTED_PROXY]=${ANS[PROXY_IP]} ;;
     *)
-      ANS[LOCAL_BIND]=127.0.0.1 ;;
+      ANS[PROXY_BIND]=127.0.0.1
+      # Docker relays a loopback connection from its network gateway, which
+      # configure_env pins and trusts.
+      ANS[TRUSTED_PROXY]=gateway ;;
   esac
 }
-valid_tunnel_access() { [[ "$1" =~ ^(1|2|host|network)$ ]]; }
+valid_forwarder_access() { [[ "$1" =~ ^(1|2|host|other)$ ]]; }
+valid_bind_address() { valid_ipv4 "$1" && [ "$1" != "0.0.0.0" ]; }
 
 # Local test mode: this computer only, or the devices on its home network too.
-# Caddy then listens on that one private address — never on every address, or a
-# server with a public interface would publish a plain-http site to the internet.
+# The shop then listens on that one private address — never on every address, or
+# a server with a public interface would publish a plain-http site to the internet.
 sec_local_access() {
   local lan stored="" access_default=1
   lan=$(lan_address)
-  if [ "${CFG[SELFHOST_MODE]:-}" = local ] && [ -n "${CFG[LOCAL_BIND]:-}" ] && [ "${CFG[LOCAL_BIND]}" != 127.0.0.1 ]; then
-    stored=${CFG[LOCAL_BIND]}
+  if [ "${CFG[SELFHOST_MODE]:-}" = local ] && [ -n "${CFG[PROXY_BIND]:-}" ] && [ "${CFG[PROXY_BIND]}" != 127.0.0.1 ]; then
+    stored=${CFG[PROXY_BIND]}
   fi
   if [ -z "$lan" ] && [ -z "$stored" ]; then
     case "${PS_LOCAL_ACCESS:-}" in 2|network) die "PS_LOCAL_ACCESS=network: this computer has no home-network address (10.x, 172.16–31.x or 192.168.x)." ;; esac
-    ANS[LOCAL_BIND]=127.0.0.1
+    ANS[PROXY_BIND]=127.0.0.1
     hint "Only this computer can open it: it has no home-network address (10.x, 172.16–31.x or 192.168.x)."
     return 0
   fi
@@ -359,7 +344,7 @@ sec_local_access() {
   # Unattended installs only open it to the network when asked to
   # (PS_LOCAL_ACCESS=network), so an existing script never starts exposing it.
   if [ -n "$stored" ] || { [ -n "$lan" ] && ! is_wsl && ! unattended; }; then access_default=2; fi
-  if [ "${CFG[SELFHOST_MODE]:-}" = local ] && [ "${CFG[LOCAL_BIND]:-}" = 127.0.0.1 ]; then access_default=1; fi
+  if [ "${CFG[SELFHOST_MODE]:-}" = local ] && [ "${CFG[PROXY_BIND]:-}" = 127.0.0.1 ]; then access_default=1; fi
   say ""
   say "  Who should be able to open it?"
   say "   1) Only this computer            ${C_DIM}http://localhost${C_OFF}"
@@ -369,11 +354,11 @@ sec_local_access() {
     2|network)
       ask LOCAL_ADDRESS "This computer's address on your network" "${stored:-$lan}" valid_lan_address \
         "Enter one of this computer's own private addresses: $(private_ipv4s | paste -sd' ' -)."
-      ANS[LOCAL_BIND]=${ANS[LOCAL_ADDRESS]}
+      ANS[PROXY_BIND]=${ANS[LOCAL_ADDRESS]}
       warn "Anyone on your network can open it, and it's plain http: use a network you trust."
       hint "The admin password travels unencrypted on it. Nothing on the internet can reach it." ;;
     *)
-      ANS[LOCAL_BIND]=127.0.0.1
+      ANS[PROXY_BIND]=127.0.0.1
       hint "Only this computer can open it. On Windows (WSL2), open the address in your Windows browser." ;;
   esac
 }
@@ -396,7 +381,7 @@ private_ipv4s() {
     if is_private_ipv4 "$a"; then echo "$a"; fi
   done
 }
-# One of this computer's own private addresses: the only kind Caddy can listen on.
+# One of this computer's own private addresses.
 # (The list is captured first: `private_ipv4s | grep -q` would let grep's early
 # exit SIGPIPE the loop, and pipefail would then fail a valid address.)
 valid_lan_address() {
@@ -414,9 +399,11 @@ lan_address() {
   own=$(private_ipv4s)
   echo "${own%%$'\n'*}"
 }
-valid_local_port() { [[ "$1" =~ ^[0-9]{4,5}$ ]] && [ "$1" -ge 1024 ] && [ "$1" -le 65535 ] && [ "$1" != 8080 ]; }
+valid_local_port() { [[ "$1" =~ ^[0-9]{4,5}$ ]] && [ "$1" -ge 1024 ] && [ "$1" -le 65535 ]; }
 check_local_port_free() {
-  if ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)$1\$" && ! docker ps --format '{{.Names}}' | grep -q '^print-caddy-'; then
+  # The shop's own container holding the port (a re-run) is fine.
+  if ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)$1\$" \
+    && ! docker ps --filter label=com.docker.compose.project=print --format '{{.Ports}}' | grep -q ":$1->"; then
     die "Port $1 is already in use on this computer. Run again and pick another port."
   fi
   ok "Port $1 is free"
@@ -437,36 +424,6 @@ initials_for() {
 }
 valid_tagline() { valid_text_or_empty "$1" && [ ${#1} -le 80 ]; }
 valid_city()    { valid_text_or_empty "$1" && [ ${#1} -le 60 ]; }
-valid_mode_choice() { [[ "$1" =~ ^(1|2|3|4|5|caddy|tunnel|proxy|local|owntunnel)$ ]]; }
-valid_tunnel_token() { [[ "$1" =~ ^[A-Za-z0-9+/=_-]{60,}$ ]]; }
-valid_bind_address() { valid_ipv4 "$1" && [ "$1" != "0.0.0.0" ]; }
-
-check_ports_free() {
-  local busy
-  busy=$(ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E '(^|:)(80|443)$' || true)
-  if [ -n "$busy" ] && ! docker ps --format '{{.Names}}' | grep -q '^print-caddy-'; then
-    err "Something on this server already uses port 80 or 443:"
-    ss -ltnp 2>/dev/null | grep -E ':(80|443)\s' | sed 's/^/    /' >&2 || true
-    die "Stop that web server (or choose option 3 and put this site behind it), then run this again."
-  fi
-  ok "Ports 80 and 443 are free"
-}
-
-check_dns() {
-  local domain=$1 public resolved
-  public=$(curl -fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)
-  # getent exits non-zero for a name that doesn't resolve yet — expected here.
-  resolved=$(getent ahostsv4 "$domain" 2>/dev/null | awk 'NR==1 {print $1}' || true)
-  if [ -z "$resolved" ]; then
-    warn "$domain doesn't resolve yet. Point an A record at ${public:-the IP of this server} — HTTPS starts working once it does."
-  elif [ -n "$public" ] && [ "$resolved" != "$public" ]; then
-    warn "$domain points at $resolved, but this server's public IP looks like $public."
-    hint "Fine if a CDN or NAT sits in between; otherwise fix the DNS A record, or Let's Encrypt will fail."
-  else
-    ok "$domain points at this server"
-  fi
-}
-
 sec_admin() {
   head_line "Admin password"
   hint "You'll use this at $(site_url)/admin to manage quotes, rates and colours."
@@ -569,7 +526,7 @@ summary() {
   say "  Materials page: $(material_ids "${ANS[MATERIALS_PAGE]}" | paste -sd, - | sed 's/,/, /g')"
   say "  WhatsApp:    ${ANS[WHATSAPP]:-(none)}"
   say "  Install dir: $ROOT_DIR"
-  confirm "Build and start the site now? (the first build takes 10–25 minutes)" Y START || die "Nothing was changed."
+  confirm "Download and start the site now? (about 3 GB the first time)" Y START || die "Nothing was changed."
 }
 
 # ── Resume support ────────────────────────────────────────────────────────────
@@ -607,73 +564,35 @@ configure_env() {
   CFG[SELFHOST]=1
   CFG[SELFHOST_MODE]=$mode
   CFG[SELFHOST_DOMAIN]=${ANS[DOMAIN]}
-  CFG[SELFHOST_ACME_EMAIL]=${ANS[ACME_EMAIL]:-}
-  CFG[SELFHOST_VERSION]=$(git -C "$ROOT_DIR" rev-parse --short HEAD)
+  CFG[SELFHOST_VERSION]=$(git -C "$ROOT_DIR" rev-parse --short=7 HEAD)
   # update.sh follows the branch this checkout was installed from.
   local branch; branch=$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD)
   [ "$branch" = HEAD ] || CFG[SELFHOST_BRANCH]=$branch
-  CFG[APP_ORIGIN]=$(site_url)
-  if [ "$mode" = local ] || [ "$mode" = owntunnel ]; then
-    CFG[LOCAL_PORT]=${ANS[LOCAL_PORT]}
-    CFG[LOCAL_BIND]=${ANS[LOCAL_BIND]:-127.0.0.1}
-  else
-    unset 'CFG[LOCAL_PORT]' 'CFG[LOCAL_BIND]'
-  fi
-  [ -n "${PS_TLS_INTERNAL:-}" ] && CFG[SELFHOST_TLS_INTERNAL]=$PS_TLS_INTERNAL
+  [ -n "${PS_IMAGE_REPO:-}" ] && CFG[PRINT_IMAGE_REPO]=$PS_IMAGE_REPO
   apply_env_defaults || true
-
-  unset 'CFG[EDGE_SUBNET]' 'CFG[EDGE_CADDY_IP]' 'CFG[TUNNEL_SUBNET]' 'CFG[TUNNEL_CADDY_IP]' 'CFG[TUNNEL_CLOUDFLARED_IP]' 'CFG[CLOUDFLARE_TUNNEL_TOKEN]'
-  case "$mode" in
-    caddy|tunnel|local|owntunnel)
-      CFG[EDGE_SUBNET]=${PREV_EDGE_SUBNET:-$(pick_subnet)}
-      CFG[EDGE_CADDY_IP]=$(subnet_host "${CFG[EDGE_SUBNET]}" 10)
-      CFG[PROXY_BIND]=127.0.0.1
-      CFG[TRUSTED_PROXY_CIDR]=${CFG[EDGE_CADDY_IP]} ;;
-    proxy)
-      CFG[PROXY_BIND]=${ANS[PROXY_BIND]}
-      CFG[TRUSTED_PROXY_CIDR]=${ANS[PROXY_IP]} ;;
+  CFG[APP_ORIGIN]=$(site_url)
+  CFG[PROXY_BIND]=${ANS[PROXY_BIND]}
+  CFG[PROXY_PORT]=${ANS[PROXY_PORT]}
+  CFG[REAL_IP_HEADER]=${ANS[REAL_IP_HEADER]:-X-Real-IP}
+  case "${ANS[TRUSTED_PROXY]:-}" in
+    "") CFG[TRUSTED_PROXY_CIDR]="" ;;
+    gateway) CFG[TRUSTED_PROXY_CIDR]=${CFG[PRINT_GATEWAY]} ;;
+    *) CFG[TRUSTED_PROXY_CIDR]=${ANS[TRUSTED_PROXY]} ;;
   esac
   if [ "$mode" = tunnel ]; then
-    CFG[TUNNEL_SUBNET]=${PREV_TUNNEL_SUBNET:-$(pick_subnet "${CFG[EDGE_SUBNET]}")}
-    CFG[TUNNEL_CADDY_IP]=$(subnet_host "${CFG[TUNNEL_SUBNET]}" 10)
-    CFG[TUNNEL_CLOUDFLARED_IP]=$(subnet_host "${CFG[TUNNEL_SUBNET]}" 20)
-    CFG[CLOUDFLARE_TUNNEL_TOKEN]=${ANS[TUNNEL_TOKEN]}
-  fi
-  if [ "$mode" = tunnel ] || [ "$mode" = owntunnel ]; then
     CFG[MAX_UPLOAD_MB]=95
   elif [ "${CFG[MAX_UPLOAD_MB]:-300}" = 95 ]; then
     CFG[MAX_UPLOAD_MB]=300
   fi
-  CFG[COMPOSE_FILE]=$(compose_files_for_mode "$mode")
-  [ -n "${ANS[PRINTER_MACHINE]:-}" ] && CFG[PRINTER_MACHINE]=${ANS[PRINTER_MACHINE]}
-  [ -n "${ANS[PRINTER_MULTI]:-}" ] && CFG[PRINTER_MULTI_MATERIAL]=${ANS[PRINTER_MULTI]}
-  if [ -n "${ANS[PRINTER_ADVANCED]:-}" ]; then
-    CFG[PRINTER_ADVANCED]=${ANS[PRINTER_ADVANCED]}
+  if [ -n "${ANS[PRINTER_MACHINE]:-}" ]; then
+    CFG[PRINTER_MACHINE]=${ANS[PRINTER_MACHINE]}
+    CFG[PRINTER_MULTI_MATERIAL]=${ANS[PRINTER_MULTI]:-0}
+    CFG[PRINTER_ADVANCED]=${ANS[PRINTER_ADVANCED]:-0}
     CFG[PRINTER_DISPLAY_NAME]=${ANS[PRINTER_NAME]:-}
   fi
-  # Menu 2 asks no printer questions: the tests above then fail, and that
+  # Menu 2 asks no printer questions: the test above then fails, and that
   # status must not become the function's, or set -e ends the installer.
   return 0
-}
-
-generate_secrets() {
-  # Only ever generated once: rotating them on a re-run would lock the
-  # database out of its own data.
-  if [ -z "${CFG[POSTGRES_PASSWORD]:-}" ]; then
-    local owner web worker
-    owner=$(rand_hex 32); web=$(rand_hex 32); worker=$(rand_hex 32)
-    CFG[POSTGRES_PASSWORD]=$owner
-    CFG[MIGRATION_DATABASE_URL]="postgresql://${CFG[POSTGRES_USER]}:$owner@postgres:5432/${CFG[POSTGRES_DB]}"
-    CFG[DATABASE_URL]="postgresql://print_web:$web@postgres:5432/${CFG[POSTGRES_DB]}"
-    CFG[WORKER_DATABASE_URL]="postgresql://print_worker:$worker@postgres:5432/${CFG[POSTGRES_DB]}"
-    ok "Database passwords generated"
-  fi
-  [ -n "${CFG[REDIS_PASSWORD]:-}" ] || CFG[REDIS_PASSWORD]=$(rand_hex 32)
-  [ -n "${CFG[SESSION_SECRET]:-}" ] || CFG[SESSION_SECRET]=$(rand_hex 32)
-  # Compose refuses to even build with this unset. The real hash replaces the
-  # marker once the tools image exists; web never starts with it (and would
-  # refuse to if it did).
-  [ -n "${CFG[ADMIN_PASSWORD_HASH]:-}" ] || CFG[ADMIN_PASSWORD_HASH]=pending-install
 }
 
 configure_integrations() {
@@ -696,88 +615,74 @@ configure_integrations() {
   fi
 }
 
-build_images() {
-  head_line "Building (10–25 minutes the first time; later updates are faster)"
-  dc build --pull || die "The build failed. Scroll up for the first error, or run: cd $ROOT_DIR && docker compose build"
-  ok "Images built"
+# The image published for this checkout's commit, or `latest` while that one
+# is still being built. PS_BUILD=1 builds it here from the checkout instead
+# (no registry access needed; takes 10–25 minutes).
+fetch_image() {
+  head_line "Downloading the shop (about 3 GB the first time)"
+  if [ "${PS_BUILD:-0}" = 1 ]; then
+    CFG[PRINT_IMAGE]=print-farm:local
+    write_env
+    dc build --pull || die "The build failed. Scroll up for the first error, or run: cd $ROOT_DIR && docker compose build"
+    ok "Image built"
+    return 0
+  fi
+  local image latest
+  image=$(image_for_commit)
+  latest="${CFG[PRINT_IMAGE_REPO]:-$DEFAULT_IMAGE_REPO}:latest"
+  if pull_image "$image"; then
+    CFG[PRINT_IMAGE]=$image
+  elif pull_image "$latest"; then
+    warn "The image for this exact version isn't published yet; using the latest one."
+    CFG[PRINT_IMAGE]=$latest
+  else
+    die "Could not download ${CFG[PRINT_IMAGE_REPO]:-$DEFAULT_IMAGE_REPO}.
+  If the image is private, log in first: docker login ghcr.io
+  Or build it on this server instead: sudo PS_BUILD=1 $ROOT_DIR/install.sh"
+  fi
+  write_env
+  ok "Downloaded ${CFG[PRINT_IMAGE]}"
 }
 
 set_admin_password() {
   local hash
   # Resuming with a hash already in place and no new password: keep it.
-  if [ -z "${ANS[ADMIN_PASSWORD]:-}" ] && [ "${CFG[ADMIN_PASSWORD_HASH]:-pending-install}" != "pending-install" ]; then
+  if [ -z "${ANS[ADMIN_PASSWORD]:-}" ] && [ -n "${CFG[ADMIN_PASSWORD_HASH]:-}" ]; then
     return 0
   fi
   say "  Hashing the admin password…"
-  dc --profile tools build tools >/dev/null || die "Could not build the password helper."
-  hash=$(printf '%s' "${ANS[ADMIN_PASSWORD]}" | dc --profile tools run --rm -T tools 2>/dev/null | tail -n1) || hash=""
-  docker image rm print-tools >/dev/null 2>&1 || true
-  [[ "$hash" =~ ^\$2[aby]\$1[2-9]\$[./A-Za-z0-9]{53}$ ]] || die "Hashing the admin password failed."
+  hash=$(hash_admin_password "${CFG[PRINT_IMAGE]}" "${ANS[ADMIN_PASSWORD]}") || die "Hashing the admin password failed."
   CFG[ADMIN_PASSWORD_HASH]=$hash
   write_env
   ok "Admin password set"
 }
 
-# Postgres only reads POSTGRES_PASSWORD when it creates its database. The
-# project name is pinned ("print"), so a database left by an earlier install —
-# even one whose folder was deleted — is picked up again, still locked with
-# the password from that install's .env, and migrate fails with P1000. Find
-# that case before starting and let the owner keep the data or delete it.
-# The scripts below run inside the postgres container, so the credentials come
-# from its environment (this .env) and never appear on a command line.
-# shellcheck disable=SC2016
-PG_OWN_PASSWORD_WORKS='PGPASSWORD="$POSTGRES_PASSWORD" psql -X -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "select 1"'
-# shellcheck disable=SC2016
-PG_SOCKET_WORKS='psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "select 1"'
-# shellcheck disable=SC2016
-PG_SET_OWN_PASSWORD='psql -X -q -v ON_ERROR_STOP=1 -v owner="$POSTGRES_USER" -v pw="$POSTGRES_PASSWORD" -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+# Everything durable (database, uploads, generated secrets) lives in one Docker
+# volume, which outlives the install folder. Picking up one left by an earlier
+# install just works — its secrets are inside it — but say so, and offer a
+# clean start.
 valid_existing_data() { [[ "$1" =~ ^(1|2|3|keep|delete|quit)$ ]]; }
-
-reconcile_database() {
-  local vol created waited=0 health typed
+reconcile_data_volume() {
+  local vol created typed
   vol=$(docker volume ls -q --filter label=com.docker.compose.project=print \
-    --filter label=com.docker.compose.volume=pgdata 2>/dev/null | head -n1 || true)
+    --filter label=com.docker.compose.volume=data 2>/dev/null | head -n1 || true)
   [ -n "$vol" ] || return 0
-
-  dc up -d postgres </dev/null >/dev/null 2>&1 || die "The database didn't start. See: cd $ROOT_DIR && docker compose logs --tail 80 postgres"
-  while true; do
-    health=$(docker inspect -f '{{.State.Health.Status}}' "$(dc ps -q postgres 2>/dev/null)" 2>/dev/null || echo starting)
-    [ "$health" = healthy ] && break
-    [ "$waited" -ge 120 ] && die "The database didn't start. See: cd $ROOT_DIR && docker compose logs --tail 80 postgres"
-    sleep 3; waited=$((waited + 3))
-  done
-  # Over the network, as migrate connects: loopback connections are trusted
-  # and would pass whatever the password.
-  dc exec -T postgres sh -c "$PG_OWN_PASSWORD_WORKS" </dev/null >/dev/null 2>&1 && return 0
-
-  dc exec -T postgres sh -c "$PG_SOCKET_WORKS" </dev/null >/dev/null 2>&1 \
-    || die "This server has a database from an earlier install ($vol) that this installer can't use.
-  It doesn't have the '${CFG[POSTGRES_USER]}' user or the '${CFG[POSTGRES_DB]}' database.
-  To delete it and start fresh: cd $ROOT_DIR && docker compose down -v   (this deletes its data)"
-
+  [ -z "$(dc ps -aq "$SERVICE" 2>/dev/null)" ] || return 0
   created=$(docker volume inspect -f '{{.CreatedAt}}' "$vol" 2>/dev/null || true)
   created=${created:0:16}
-  head_line "Database from an earlier install"
-  warn "This server still has the database of an earlier install${created:+ (created ${created/T/ })}."
-  hint "Docker keeps it after the install folder is deleted, but its password was in that"
-  hint "install's .env, so this one can't open it."
-  say "   1) Keep it — switch it to this install's password  ${C_DIM}(its quotes and uploads stay; the shop settings you entered replace its old ones)${C_OFF}"
-  say "   2) Delete it and start with an empty database  ${C_DIM}(also deletes its uploaded models and PDFs)${C_OFF}"
+  head_line "Data from an earlier install"
+  warn "This server still has the data of an earlier install${created:+ (created ${created/T/ })}."
+  say "   1) Keep it  ${C_DIM}(its quotes and uploads stay; the shop settings you entered replace its old ones)${C_OFF}"
+  say "   2) Delete it and start empty  ${C_DIM}(its database, uploaded models and PDFs)${C_OFF}"
   say "   3) Quit without changing anything"
   ask EXISTING_DATA "Choose 1–3" 1 valid_existing_data "Please answer 1, 2 or 3."
   case "${ANS[EXISTING_DATA]}" in
-    1|keep)
-      printf '%s\n' "ALTER ROLE :\"owner\" WITH PASSWORD :'pw';" \
-        | dc exec -T postgres sh -c "$PG_SET_OWN_PASSWORD" >/dev/null \
-        || die "Could not change the old database's password."
-      dc exec -T postgres sh -c "$PG_OWN_PASSWORD_WORKS" </dev/null >/dev/null 2>&1 \
-        || die "The old database still refuses this install's password."
-      ok "Kept the earlier database; it now uses this install's password" ;;
+    1|keep) ok "Keeping the earlier data" ;;
     2|delete)
       typed="${PS_CONFIRM_DELETE_TEXT:-}"
       unattended || read -r -p "Type DELETE to confirm: " typed </dev/tty
       [ "$typed" = "DELETE" ] || die "Nothing was deleted. Run this again to choose."
-      dc --profile tools down -v --remove-orphans
+      docker volume rm "$vol" >/dev/null || die "Could not delete $vol."
       ok "Deleted the earlier install's data" ;;
     *) die "Nothing was changed. Run this again to choose." ;;
   esac
@@ -786,7 +691,8 @@ reconcile_database() {
 start_stack() {
   head_line "Starting"
   dc up -d --remove-orphans || die "Starting failed. See: cd $ROOT_DIR && docker compose logs --tail 80"
-  wait_healthy 420 || die "The site didn't come up."
+  # The first boot creates the database and the printer's profiles.
+  wait_healthy 600 || die "The site didn't come up."
 }
 
 # The seed payload. Kept out of a command substitution: a heredoc nested in
@@ -847,7 +753,7 @@ seed_shop_settings() {
   fi
   local payload
   payload=$(settings_json "$json_page" "$json_rates" "$json_offered" "$json_colours" "$json_customs")
-  printf '%s' "$payload" | dc run --rm -T migrate seed-settings >/dev/null || die "Saving the shop settings failed."
+  printf '%s' "$payload" | dc exec -T "$SERVICE" print-farm seed-settings >/dev/null || die "Saving the shop settings failed."
   ok "Shop settings saved"
 }
 
@@ -857,26 +763,25 @@ finish() {
   say "  Your site:  ${C_BOLD}$url${C_OFF}"
   say "  Admin:      ${C_BOLD}$url/admin${C_OFF}  (the password you chose)"
   case "${CFG[SELFHOST_MODE]}" in
-    caddy)
-      if curl -fsS --max-time 15 "$url/api/health" >/dev/null 2>&1; then ok "Reachable over HTTPS"
-      else warn "Not reachable over HTTPS yet — usually DNS still propagating. Caddy keeps retrying the certificate."; fi ;;
-    tunnel) hint "Make sure the tunnel's public hostname points ${CFG[SELFHOST_DOMAIN]} at http://caddy:80." ;;
-    owntunnel)
-      if curl -fsS --max-time 15 "$url/api/health" >/dev/null 2>&1; then ok "Reachable through your tunnel"
-      else hint "In your tunnel, point the public hostname ${CFG[SELFHOST_DOMAIN]} at http://${CFG[LOCAL_BIND]}:${CFG[LOCAL_PORT]}."; fi ;;
     local)
       local where="in your browser" who="Only this computer can open it."
-      if [ "${CFG[LOCAL_BIND]:-127.0.0.1}" != 127.0.0.1 ]; then
+      if [ "${CFG[PROXY_BIND]:-127.0.0.1}" != 127.0.0.1 ]; then
         where="on any device on your network"; who="Devices on your network can open it (plain http)."
       fi
       if curl -fsS --max-time 15 "$url/api/health" >/dev/null 2>&1; then ok "Open $url $where"
       else warn "The site isn't answering on $url yet — give it a minute, then check: docker compose ps"; fi
       hint "$who Happy with it? Put it online with: sudo $ROOT_DIR/install.sh (option 2)" ;;
-    proxy)
-      say ""
-      say "  Point your reverse proxy at http://${CFG[PROXY_BIND]}:8080 (from ${CFG[TRUSTED_PROXY_CIDR]} only)."
-      say "  It must terminate HTTPS, OVERWRITE X-Real-IP and X-Forwarded-For with the visitor's IP,"
-      say "  and allow request bodies up to 301 MB on /api/uploads. Full nginx example: docs/DEPLOYMENT.md" ;;
+    proxy|tunnel)
+      local target="http://${CFG[PROXY_BIND]}:${CFG[PROXY_PORT]}"
+      if curl -fsS --max-time 15 "$url/api/health" >/dev/null 2>&1; then ok "Reachable at $url"
+      elif [ "${CFG[SELFHOST_MODE]}" = tunnel ]; then
+        hint "In your tunnel, point the public hostname ${CFG[SELFHOST_DOMAIN]} at $target."
+      else
+        hint "Point your reverse proxy for ${CFG[SELFHOST_DOMAIN]} at $target (HTTPS, X-Real-IP overwritten; docs/DEPLOYMENT.md)."
+      fi
+      if [ -n "${CFG[TRUSTED_PROXY_CIDR]:-}" ]; then
+        hint "Only ${CFG[TRUSTED_PROXY_CIDR]} may connect to $target; anything else gets 403."
+      fi ;;
   esac
   say ""
   say "  Next, in the admin dashboard:"
@@ -889,6 +794,7 @@ finish() {
   say ""
   say "  Update to the latest version any time:  ${C_BOLD}sudo $ROOT_DIR/update.sh${C_OFF}"
   say "  Change settings or uninstall:           ${C_BOLD}sudo $ROOT_DIR/install.sh${C_OFF}"
+  say "  Back up everything:                     ${C_BOLD}cd $ROOT_DIR && docker compose exec -T print-farm print-farm backup > shop.pgdump${C_OFF}"
 }
 
 # ── Existing install ──────────────────────────────────────────────────────────
@@ -896,15 +802,15 @@ uninstall() {
   head_line "Uninstall"
   [ "${CFG[SELFHOST]:-}" = "1" ] || die "This .env wasn't written by install.sh — refusing to uninstall anything."
   confirm "Stop and remove the site's containers?" N UNINSTALL || die "Nothing was changed."
-  dc --profile tools down --remove-orphans
+  dc down --remove-orphans
   ok "Containers removed (your data is still there)"
-  warn "The database, uploaded models and quotation PDFs are kept in Docker volumes."
+  warn "The database, uploaded models and quotation PDFs are kept in a Docker volume."
   local deleted=0
   if confirm "Delete ALL of that data permanently?" N DELETE_DATA; then
     local typed="${PS_CONFIRM_DELETE_TEXT:-}"
     unattended || read -r -p "Type DELETE to confirm: " typed </dev/tty
     if [ "$typed" = "DELETE" ]; then
-      dc --profile tools down -v --remove-orphans
+      dc down -v --remove-orphans
       ok "Data deleted"
       deleted=1
     else
@@ -914,8 +820,7 @@ uninstall() {
   if [ "$deleted" = 1 ]; then
     say "  The code is still in $ROOT_DIR — delete that folder to remove everything."
   else
-    # The volumes outlive the folder, but their password lives in its .env.
-    say "  The code is still in $ROOT_DIR. Its .env holds the password to the data kept above:"
+    say "  The code is still in $ROOT_DIR, and its .env holds your settings and admin login:"
     say "  keep it, and bring the site back any time with: sudo $ROOT_DIR/install.sh"
     say "  To remove everything, uninstall again and delete the data, then delete the folder."
   fi
@@ -924,8 +829,8 @@ uninstall() {
 
 existing_menu() {
   head_line "This site is already installed"
-  say "  1) Rebuild and restart with the current settings"
-  say "  2) Change the web address / HTTPS setup"
+  say "  1) Restart with the current settings"
+  say "  2) Change the web address / how people reach it"
   say "  3) Change the admin password"
   say "  4) Change optional extras (email, shipping, Telegram, map)"
   say "  5) Change the printer"
@@ -967,8 +872,6 @@ main() {
     *) die "Unknown option $1 (try --help)" ;;
   esac
   preflight
-  PREV_EDGE_SUBNET=${CFG[EDGE_SUBNET]:-}
-  PREV_TUNNEL_SUBNET=${CFG[TUNNEL_SUBNET]:-}
 
   if [ "${CFG[SELFHOST]:-}" = "1" ] && [ "${CFG[SELFHOST_STATE]:-}" != "installed" ]; then
     resume_install
@@ -978,29 +881,27 @@ main() {
   if [ "${CFG[SELFHOST]:-}" = "1" ]; then
     existing_menu
     case "${ANS[MENU]}" in
-      1) apply_env_defaults || true; write_env; render_caddyfile; build_images
-         generate_printer_profiles || die "Slicing profiles could not be built."; start_stack; finish ;;
-      2) local old_mode=${CFG[SELFHOST_MODE]}
-         sec_address; configure_env
-         # A different edge layout needs its networks recreated.
-         [ "$old_mode" = "${CFG[SELFHOST_MODE]}" ] || dc down --remove-orphans
-         write_env; render_caddyfile; start_stack; finish ;;
-      3) ANS[DOMAIN]=${CFG[SELFHOST_DOMAIN]}; sec_admin; set_admin_password; dc up -d --force-recreate web; wait_healthy 180; ok "Password changed" ;;
+      1) apply_env_defaults || true; write_env; start_stack; finish ;;
+      2) sec_address; configure_env; write_env; start_stack; finish ;;
+      3) ANS[DOMAIN]=${CFG[SELFHOST_DOMAIN]}; sec_admin; set_admin_password; dc up -d; wait_healthy 240; ok "Password changed" ;;
       4) ANS[DOMAIN]=${CFG[SELFHOST_DOMAIN]}
          ask MAPS_URL "Google Maps embed link (optional)" "${CFG[GOOGLE_MAPS_EMBED_URL]:-}" valid_maps_or_empty "Paste the https://www.google.com/maps/embed?... link."
-         sec_integrations; configure_integrations; write_env; dc up -d --force-recreate web; wait_healthy 180; ok "Saved" ;;
+         sec_integrations; configure_integrations; write_env; dc up -d; wait_healthy 240; ok "Saved" ;;
       5) sec_printer
-         local old_machine=${CFG[PRINTER_MACHINE]:-} old_multi=${CFG[PRINTER_MULTI_MATERIAL]:-0}
-         local old_advanced=${CFG[PRINTER_ADVANCED]:-0} old_name=${CFG[PRINTER_DISPLAY_NAME]:-}
+         local -A old=()
+         local k
+         for k in PRINTER_MACHINE PRINTER_MULTI_MATERIAL PRINTER_ADVANCED PRINTER_DISPLAY_NAME; do old[$k]=${CFG[$k]:-}; done
          CFG[PRINTER_MACHINE]=${ANS[PRINTER_MACHINE]}; CFG[PRINTER_MULTI_MATERIAL]=${ANS[PRINTER_MULTI]}
          CFG[PRINTER_ADVANCED]=${ANS[PRINTER_ADVANCED]}; CFG[PRINTER_DISPLAY_NAME]=${ANS[PRINTER_NAME]}
-         if ! generate_printer_profiles; then
-           CFG[PRINTER_MACHINE]=$old_machine; CFG[PRINTER_MULTI_MATERIAL]=$old_multi
-           CFG[PRINTER_ADVANCED]=$old_advanced; CFG[PRINTER_DISPLAY_NAME]=$old_name
-           die "Kept the previous printer."
-         fi
          write_env
-         dc up -d --force-recreate web worker; wait_healthy 240; ok "Now quoting for ${CFG[PRINTER_DISPLAY_NAME]:-${CFG[PRINTER_MACHINE]% 0.4 nozzle}}" ;;
+         # The container generates the new printer's profiles as it starts.
+         if ! { dc up -d && wait_healthy 420; }; then
+           for k in "${!old[@]}"; do CFG[$k]=${old[$k]}; done
+           write_env
+           dc up -d >/dev/null 2>&1 || true
+           die "That printer's profiles could not be built; kept the previous printer."
+         fi
+         ok "Now quoting for ${CFG[PRINTER_DISPLAY_NAME]:-${CFG[PRINTER_MACHINE]% 0.4 nozzle}}" ;;
       6) ANS[DOMAIN]=${CFG[SELFHOST_DOMAIN]}; sec_shop; sec_materials; sec_contact
          confirm "Replace the shop settings in the admin dashboard with these?" N RESET || die "Nothing was changed."
          seed_shop_settings ;;
@@ -1010,7 +911,7 @@ main() {
     exit 0
   fi
 
-  say "This sets up the whole site: shop details, web address, rates, then a build."
+  say "This sets up the whole site: shop details, web address, rates, then downloads and starts it."
   hint "Press Enter to accept a [default]. Ctrl+C stops at any point without changing anything."
   changeable_later
   sec_shop
@@ -1023,23 +924,18 @@ main() {
   summary
 
   configure_env
-  generate_secrets
   configure_integrations
   CFG[SELFHOST_STATE]=configured
   write_env
   save_answers
   ok "Settings written to $ENV_FILE"
-  install_from_build
+  install_from_image
 }
 
 # Everything after the questions; also where an interrupted install resumes.
-install_from_build() {
-  render_caddyfile
-  # Before the long build: it may need an answer, and only uses the stock
-  # postgres image.
-  reconcile_database
-  build_images
-  generate_printer_profiles || die "Pick another printer with: sudo $ROOT_DIR/install.sh (option 5)."
+install_from_image() {
+  reconcile_data_volume
+  fetch_image
   set_admin_password
   start_stack
   seed_shop_settings
@@ -1061,13 +957,13 @@ resume_install() {
     save_answers
   fi
   mapfile -t OFFERED < <(material_ids "${ANS[MATERIALS]}")
-  if [ "${CFG[ADMIN_PASSWORD_HASH]:-pending-install}" = "pending-install" ]; then
+  if [ -z "${CFG[ADMIN_PASSWORD_HASH]:-}" ]; then
     ANS[DOMAIN]=${CFG[SELFHOST_DOMAIN]}
     sec_admin
   fi
   apply_env_defaults || true
   write_env
-  install_from_build
+  install_from_image
 }
 
 main "$@"

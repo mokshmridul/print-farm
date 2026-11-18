@@ -182,23 +182,29 @@ env_value() {
 # .env that are not listed here are kept, under "Other".
 ENV_LAYOUT=(
   "# --- Install (managed by install.sh / update.sh) ---"
-  SELFHOST SELFHOST_STATE SELFHOST_VERSION SELFHOST_BRANCH SELFHOST_MODE SELFHOST_DOMAIN SELFHOST_ACME_EMAIL SELFHOST_TLS_INTERNAL
-  COMPOSE_FILE
-  "# --- Edge / HTTPS ---"
-  APP_ORIGIN PROXY_BIND TRUSTED_PROXY_CIDR EDGE_SUBNET EDGE_CADDY_IP
-  TUNNEL_SUBNET TUNNEL_CADDY_IP TUNNEL_CLOUDFLARED_IP CLOUDFLARE_TUNNEL_TOKEN LOCAL_PORT LOCAL_BIND
-  "# --- Database and cache (generated secrets) ---"
-  POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
-  MIGRATION_DATABASE_URL DATABASE_URL WORKER_DATABASE_URL REDIS_PASSWORD
-  "# --- App secrets ---"
+  SELFHOST SELFHOST_STATE SELFHOST_VERSION SELFHOST_BRANCH SELFHOST_MODE SELFHOST_DOMAIN
+  COMPOSE_FILE PRINT_IMAGE_REPO PRINT_IMAGE
+  "# --- Network ---"
+  APP_ORIGIN PROXY_BIND PROXY_PORT TRUSTED_PROXY_CIDR REAL_IP_HEADER PRINT_SUBNET PRINT_GATEWAY
+  "# --- App secrets (database and Redis passwords are generated inside the container) ---"
   SESSION_SECRET ADMIN_PASSWORD_HASH
   "# --- Integrations (optional) ---"
   GOOGLE_MAPS_EMBED_URL RESEND_API_KEY MAIL_TO CONTACT_FROM
   TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID SHIPROCKET_EMAIL SHIPROCKET_PASSWORD SHIPROCKET_PICKUP_PINCODE
   "# --- Sizing ---"
-  MAX_UPLOAD_MB WORKER_CONCURRENCY SELFHOST_WEB_CPUS SELFHOST_WORKER_CPUS SELFHOST_DB_CPUS
-  "# --- Printer (profiles generated into .selfhost/profiles) ---"
+  MAX_UPLOAD_MB WORKER_CONCURRENCY PRINT_MEMORY
+  "# --- Printer (profiles generated inside the container) ---"
   PRINTER_MACHINE PRINTER_MULTI_MATERIAL PRINTER_ADVANCED PRINTER_DISPLAY_NAME
+)
+
+# Keys only the old multi-container layout used. update.sh drops them once an
+# install has moved to the single image.
+LEGACY_ENV_KEYS=(
+  SELFHOST_ACME_EMAIL SELFHOST_TLS_INTERNAL
+  EDGE_SUBNET EDGE_CADDY_IP TUNNEL_SUBNET TUNNEL_CADDY_IP TUNNEL_CLOUDFLARED_IP CLOUDFLARE_TUNNEL_TOKEN
+  LOCAL_PORT LOCAL_BIND
+  POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB MIGRATION_DATABASE_URL DATABASE_URL WORKER_DATABASE_URL REDIS_PASSWORD
+  SELFHOST_WEB_CPUS SELFHOST_WORKER_CPUS SELFHOST_DB_CPUS
 )
 
 write_env() {
@@ -234,8 +240,17 @@ rand_hex() { openssl rand -hex "${1:-32}"; }
 # install folder — relative COMPOSE_FILE entries resolve against the working
 # directory, exactly as when the owner types `docker compose` there.
 dc() {
-  ( cd "$ROOT_DIR" && env -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME -u COMPOSE_PROFILES docker compose "$@" )
+  ( cd "$ROOT_DIR" && env -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME -u COMPOSE_PROFILES \
+      -u PRINT_IMAGE -u APP_ORIGIN -u ADMIN_PASSWORD -u ADMIN_PASSWORD_HASH -u SESSION_SECRET \
+      docker compose "$@" )
 }
+
+SELFHOST_COMPOSE_FILE="docker-compose.yml:docker/selfhost/compose.selfhost.yml"
+SERVICE=print-farm
+DEFAULT_IMAGE_REPO="ghcr.io/mokshmridul/print-farm"
+# The installer's default printer; the image slices it with the committed,
+# hand-tuned profiles.
+A1_MACHINE="Bambu Lab A1 0.4 nozzle"
 
 # The compose project name is pinned in docker-compose.yml ("print"), so any
 # other checkout's stack on this machine would be the SAME project. Refuse to
@@ -252,20 +267,24 @@ assert_project_is_ours() {
   done
 }
 
-# Waits until web and worker report healthy and web answers through the stack.
+# Waits until the container reports healthy: web, database, Redis and the
+# slicing worker all answer (print-farm health).
 wait_healthy() {
-  local timeout="${1:-300}" waited=0 web worker
+  local timeout="${1:-300}" waited=0 state id
   printf '  waiting for the site to come up '
   while true; do
-    web=$(docker inspect -f '{{.State.Health.Status}}' "$(dc ps -q web 2>/dev/null)" 2>/dev/null || echo starting)
-    worker=$(docker inspect -f '{{.State.Health.Status}}' "$(dc ps -q worker 2>/dev/null)" 2>/dev/null || echo starting)
-    if [ "$web" = healthy ] && [ "$worker" = healthy ] \
-      && dc exec -T proxy wget -qO- http://web:3000/api/health 2>/dev/null | grep -q '"ok":true'; then
-      echo; ok "Site is up"; return 0
+    id=$(dc ps -q "$SERVICE" 2>/dev/null || true)
+    state=$(docker inspect -f '{{.State.Health.Status}}' "$id" 2>/dev/null || echo starting)
+    if [ "$state" = healthy ]; then echo; ok "Site is up"; return 0; fi
+    if [ -n "$id" ] && [ "$(docker inspect -f '{{.State.Running}}' "$id" 2>/dev/null)" = false ] \
+      && [ "$waited" -ge 15 ]; then
+      echo; err "The container stopped while starting."
+      hint "See what went wrong with: cd $ROOT_DIR && docker compose logs --tail 80"
+      return 1
     fi
     if [ "$waited" -ge "$timeout" ]; then
-      echo; err "The site did not come up within ${timeout}s (web: $web, worker: $worker)."
-      hint "See what went wrong with: cd $ROOT_DIR && docker compose logs --tail 80 migrate web worker"
+      echo; err "The site did not come up within ${timeout}s (state: $state)."
+      hint "See what went wrong with: cd $ROOT_DIR && docker compose logs --tail 80"
       return 1
     fi
     printf '.'; sleep 5; waited=$((waited + 5))
@@ -283,189 +302,59 @@ pick_subnet() {
     grep -q "172\.30\.$n\." <<<"$used" && continue
     echo "172.30.$n.0/24"; return 0
   done
-  die "Could not find a free private subnet for the stack's edge network."
+  die "Could not find a free private subnet for the shop's network."
 }
 subnet_host() { local s="${1%/*}"; echo "${s%.*}.$2"; }
 
-# ── Rendered files (.selfhost/, git-ignored) ────────────────────────────────────
-render_caddyfile() {
-  local file="$ROOT_DIR/.selfhost/Caddyfile" max_mb
-  mkdir -p "$ROOT_DIR/.selfhost"
-  # One overall ceiling just above the app's own upload cap. Per-route body
-  # limits stay in docker/proxy/nginx.conf alone (guarded by its test) — a
-  # second copy here would be one more place for a new upload route to 413.
-  max_mb=$(( ${CFG[MAX_UPLOAD_MB]:-300} + 1 ))
-  case "${CFG[SELFHOST_MODE]}" in
-    caddy)
-      {
-        echo "# Written by install.sh from .env — edits are overwritten on update."
-        echo "{"
-        echo "	admin off"
-        [ -n "${CFG[SELFHOST_ACME_EMAIL]:-}" ] && echo "	email ${CFG[SELFHOST_ACME_EMAIL]}"
-        echo "}"
-        echo
-        echo "${CFG[SELFHOST_DOMAIN]} {"
-        [ "${PS_TLS_INTERNAL:-${CFG[SELFHOST_TLS_INTERNAL]:-0}}" = "1" ] && echo "	tls internal"
-        cat <<EOF
-	request_body {
-		max_size ${max_mb}MB
-	}
-	header {
-		Strict-Transport-Security "max-age=31536000"
-		-Server
-	}
-	# Overwrite, never append: the compose nginx adopts X-Real-IP from this
-	# one peer, and rate limits key off it.
-	reverse_proxy proxy:8080 {
-		header_up X-Real-IP {remote_host}
-		header_up X-Forwarded-For {remote_host}
-		header_up X-Forwarded-Proto https
-		flush_interval -1
-	}
-}
-EOF
-      } > "$file" ;;
-    tunnel)
-      cat > "$file" <<EOF
-# Written by install.sh from .env — edits are overwritten on update.
-{
-	admin off
-	auto_https off
-	servers :80 {
-		# Only cloudflared can reach this port, so its CF-Connecting-IP is the
-		# real visitor address.
-		trusted_proxies static ${CFG[TUNNEL_CLOUDFLARED_IP]}/32
-		client_ip_headers Cf-Connecting-Ip
-	}
+# ── Image ───────────────────────────────────────────────────────────────────────
+# Every commit on the main branch is published as <repo>:sha-<7 hex>, so the
+# image always matches this checkout's scripts. `latest` is the fallback for a
+# commit whose image is still being built.
+image_for_commit() { echo "${CFG[PRINT_IMAGE_REPO]:-$DEFAULT_IMAGE_REPO}:sha-$(git -C "$ROOT_DIR" rev-parse --short=7 HEAD)"; }
+
+# pull_image IMAGE — 0 on success. Quiet unless it fails.
+pull_image() {
+  local out
+  out=$(docker pull "$1" 2>&1) && return 0
+  printf '%s\n' "$out" | tail -n 3 | sed 's/^/    /' >&2
+  return 1
 }
 
-:80 {
-	request_body {
-		max_size ${max_mb}MB
-	}
-	header -Server
-	reverse_proxy proxy:8080 {
-		header_up X-Real-IP {client_ip}
-		header_up X-Forwarded-For {client_ip}
-		header_up X-Forwarded-Proto https
-		flush_interval -1
-	}
-}
-EOF
-      ;;
-    local)
-      cat > "$file" <<EOF
-# Written by install.sh from .env — edits are overwritten on update.
-# Local test mode: plain HTTP on this computer, or its home network too
-# (published on LOCAL_BIND alone: 127.0.0.1 or one private address).
-{
-	admin off
-	auto_https off
-}
-
-:80 {
-	request_body {
-		max_size ${max_mb}MB
-	}
-	header -Server
-	reverse_proxy proxy:8080 {
-		header_up X-Real-IP {remote_host}
-		header_up X-Forwarded-For {remote_host}
-		header_up X-Forwarded-Proto http
-		flush_interval -1
-	}
-}
-EOF
-      ;;
-    owntunnel)
-      cat > "$file" <<EOF
-# Written by install.sh from .env — edits are overwritten on update.
-# Own-tunnel mode: the owner's cloudflared (already running for other things)
-# connects here. Published on LOCAL_BIND alone — 127.0.0.1 or one private
-# address — so only this computer or its network can connect, and a peer on a
-# private address is trusted for Cloudflare's CF-Connecting-IP.
-{
-	admin off
-	auto_https off
-	servers :80 {
-		trusted_proxies static private_ranges
-		client_ip_headers Cf-Connecting-Ip
-	}
-}
-
-:80 {
-	request_body {
-		max_size ${max_mb}MB
-	}
-	header -Server
-	reverse_proxy proxy:8080 {
-		header_up X-Real-IP {client_ip}
-		header_up X-Forwarded-For {client_ip}
-		header_up X-Forwarded-Proto https
-		flush_interval -1
-	}
-}
-EOF
-      ;;
-    *) rm -f "$file" ;;
-  esac
-}
-
-# ── Printer profiles ────────────────────────────────────────────────────────────
-A1_MACHINE="Bambu Lab A1 0.4 nozzle"
-
-# (Re)generate the printer's profile set into .selfhost/profiles with the worker
-# image's own OrcaSlicer presets — so an update that bumps OrcaSlicer also
-# refreshes them. Pure JSON work: nothing is sliced, nothing is fetched.
-generate_printer_profiles() {
-  local machine="${CFG[PRINTER_MACHINE]:-$A1_MACHINE}" out="$ROOT_DIR/.selfhost/profiles" tmp flags=()
-  [ "${CFG[PRINTER_MULTI_MATERIAL]:-0}" = "1" ] && flags+=(--multi-material)
-  # Advanced mode names the printer itself (it may be starting from a generic preset).
-  [ -n "${CFG[PRINTER_DISPLAY_NAME]:-}" ] && flags+=(--name "${CFG[PRINTER_DISPLAY_NAME]}")
-  tmp="$ROOT_DIR/.selfhost/profiles.new"
-  rm -rf "$tmp"; mkdir -p "$tmp"; chmod 755 "$ROOT_DIR/.selfhost" "$tmp"
-  if ! dc run --rm --no-deps -T -v "$tmp:/out" --entrypoint node worker \
-      /app/worker/dist/profile-gen.js generate "$machine" /out "${flags[@]}"; then
-    rm -rf "$tmp"
-    err "Could not build slicing profiles for: $machine"
-    return 1
-  fi
-  chmod -R a+rX "$tmp"
-  rm -rf "$out"; mv "$tmp" "$out"
-  ok "Slicing profiles ready for ${CFG[PRINTER_DISPLAY_NAME]:-${machine% 0.4 nozzle}}"
-}
-
-compose_files_for_mode() {
-  case "$1" in
-    caddy)  echo "docker-compose.yml:docker/selfhost/compose.base.yml:docker/selfhost/compose.caddy.yml" ;;
-    tunnel) echo "docker-compose.yml:docker/selfhost/compose.base.yml:docker/selfhost/compose.tunnel.yml" ;;
-    proxy)  echo "docker-compose.yml:docker/selfhost/compose.base.yml" ;;
-    local)  echo "docker-compose.yml:docker/selfhost/compose.base.yml:docker/selfhost/compose.local.yml" ;;
-    # The owner's own cloudflared connects to Caddy, published as in local mode.
-    owntunnel) echo "docker-compose.yml:docker/selfhost/compose.base.yml:docker/selfhost/compose.local.yml" ;;
-  esac
+# hash_admin_password IMAGE PASSWORD — prints the bcrypt hash. Runs the image's
+# own helper (the library the login route verifies with) with no network.
+hash_admin_password() {
+  local hash
+  hash=$(printf '%s' "$2" | docker run --rm -i --network none --read-only --cap-drop ALL \
+    --security-opt no-new-privileges --entrypoint node "$1" /opt/tools/hash-password.mjs 2>/dev/null | tail -n1) || hash=""
+  [[ "$hash" =~ ^\$2[aby]\$1[2-9]\$[./A-Za-z0-9]{53}$ ]] || return 1
+  printf '%s' "$hash"
 }
 
 # Fill keys a newer version expects, without touching anything already set.
 # Returns 0 if something was added.
 apply_env_defaults() {
-  local changed=1 cpus
-  cpus=$(nproc 2>/dev/null || echo 2)
+  local changed=1
   _default() { if [ -z "${CFG[$1]+x}" ]; then CFG[$1]="$2"; changed=0; fi; }
   _default SELFHOST_BRANCH "main"
-  _default POSTGRES_USER "print_owner"
-  _default POSTGRES_DB "print"
+  _default PRINT_IMAGE_REPO "$DEFAULT_IMAGE_REPO"
   _default MAX_UPLOAD_MB "300"
   _default WORKER_CONCURRENCY "1"
-  _default SHIPROCKET_PICKUP_PINCODE ""
-  _default PRINTER_MACHINE "$A1_MACHINE"
   _default PRINTER_MULTI_MATERIAL "0"
-  _default SELFHOST_WEB_CPUS "$(( cpus < 2 ? cpus : 2 ))"
-  _default SELFHOST_WORKER_CPUS "$(( cpus < 4 ? cpus : 4 ))"
-  _default SELFHOST_DB_CPUS "$(( cpus < 2 ? cpus : 2 ))"
-  if [ -n "${CFG[SELFHOST_MODE]:-}" ]; then
-    local files; files=$(compose_files_for_mode "${CFG[SELFHOST_MODE]}")
-    if [ "${CFG[COMPOSE_FILE]:-}" != "$files" ]; then CFG[COMPOSE_FILE]="$files"; changed=0; fi
+  _default PROXY_PORT "8080"
+  _default REAL_IP_HEADER "X-Real-IP"
+  _default PRINT_MEMORY "$(default_memory_limit)"
+  if [ -z "${CFG[PRINT_SUBNET]:-}" ]; then
+    CFG[PRINT_SUBNET]=$(pick_subnet)
+    CFG[PRINT_GATEWAY]=$(subnet_host "${CFG[PRINT_SUBNET]}" 1)
+    changed=0
   fi
+  if [ "${CFG[COMPOSE_FILE]:-}" != "$SELFHOST_COMPOSE_FILE" ]; then CFG[COMPOSE_FILE]=$SELFHOST_COMPOSE_FILE; changed=0; fi
   return $changed
+}
+
+# The container's memory ceiling: 12 GB, or what this server has less 1 GB.
+default_memory_limit() {
+  local mem_mb
+  mem_mb=$(( $(awk '/MemTotal/ {print $2}' /proc/meminfo) / 1024 ))
+  if [ "$mem_mb" -ge 13312 ]; then echo 12g; else echo "$(( mem_mb > 2048 ? mem_mb - 1024 : mem_mb ))m"; fi
 }

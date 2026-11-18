@@ -393,7 +393,11 @@ export async function main(argv: string[]) {
   process.exitCode = 64;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+// The worker bundle (dist/index.js) inlines this module through profile-test,
+// and there import.meta.url is the bundle's own URL, so the URL check alone
+// would run this CLI inside the worker. Require the entry file to be this one.
+const entry = process.argv[1] ?? "";
+if (/profile-gen\.[cm]?[jt]s$/.test(entry) && import.meta.url === pathToFileURL(entry).href) {
   main(process.argv.slice(2)).catch((err: unknown) => {
     process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
     process.exitCode = 1;

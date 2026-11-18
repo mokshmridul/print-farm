@@ -52,8 +52,12 @@ guarantee; CI and update automation are the ongoing controls.
   lock primitive with shorter leases. Rate limits, exclusive PDF creation, and
   final capacity checks remain independent controls, but a lease is not proof
   that an old holder stopped executing.
-- Orca shares the worker container and host kernel. UID/capability/network and
-  output controls reduce impact but are weaker than a disposable VM. A
+- Orca shares the container — with the web, PostgreSQL and Redis — and the
+  host kernel. Per-job uids, dropped capabilities, a cleared environment,
+  root-only secrets and output controls reduce impact but are weaker than a
+  disposable VM. Unlike the old multi-container stack, it is no longer on a
+  network without internet access, and it can reach the loopback ports of
+  PostgreSQL and Redis (though not their passwords). A
   compromised slicer can also return plausible, in-range but false time/weight
   figures and influence pricing; monitor outliers and manually review valuable
   orders.
@@ -112,7 +116,8 @@ guarantee; CI and update automation are the ongoing controls.
 
 - Never expose PostgreSQL, Redis, or port 8080 to the public internet. Firewall
   8080 to the actual reverse-proxy source, set `TRUSTED_PROXY_CIDR` to that one
-  host, and require the outer edge to overwrite both IP forwarding headers.
+  host (it is optional only for a local test with no proxy), and require the
+  outer edge to overwrite both IP forwarding headers.
 - Require HTTPS at the public edge, redirect HTTP, emit HSTS there, and omit
   query strings/referrers from every upstream access log.
 - Keep `.env` mode `0600`; use independent random secrets/passwords and rotate
