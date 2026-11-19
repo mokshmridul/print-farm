@@ -91,7 +91,7 @@ administrators receive the canonical STL, not an archival source project.
 
 ## Remaining risks and recommendations
 
-- Deployment must still identify the actual transport peer, firewall port 8080
+- Deployment must still identify the actual transport peer, firewall port 7654
   to that exact source, and prove the outer edge overwrites inbound headers.
   Follow the staged checks in [DEPLOYMENT.md](DEPLOYMENT.md). If the observed
   peer is shared NAT/subnet-router infrastructure, use a dedicated path or

@@ -2,7 +2,7 @@
 #
 # print-farm: the whole print shop in one image.
 #
-#   docker run -d --name print-farm -p 127.0.0.1:8080:8080 \
+#   docker run -d --name print-farm -p 127.0.0.1:7654:7654 \
 #     -e APP_ORIGIN=https://print.example.com -v print-data:/data \
 #     ghcr.io/mokshmridul/print-farm:latest
 #
@@ -14,7 +14,7 @@
 #   web       Next.js as the unprivileged nextjs user, on 127.0.0.1:3000
 #   worker    BullMQ slicing worker (root orchestrator; every OrcaSlicer and
 #             parse job is dropped to its own credential-free uid)
-#   nginx     the only listener visible outside: :8080, plain HTTP
+#   nginx     the only listener visible outside: :7654, plain HTTP
 #
 # HTTPS is always provided in front of this container (your reverse proxy,
 # Cloudflare Tunnel, ...). See docs/SELF-HOSTING.md and docs/DEPLOYMENT.md.
@@ -265,7 +265,7 @@ LABEL org.opencontainers.image.title="print-farm" \
 # Everything durable: database, Redis, uploads, PDFs, generated secrets and
 # printer profiles. Back it up as one unit (docs/MAINTENANCE.md).
 VOLUME ["/data"]
-EXPOSE 8080
+EXPOSE 7654
 HEALTHCHECK --interval=15s --timeout=10s --start-period=180s --retries=5 \
     CMD ["/usr/local/bin/print-farm", "health"]
 ENTRYPOINT ["/init"]

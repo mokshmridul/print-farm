@@ -2,7 +2,7 @@
 #
 #   docker compose up -d
 #
-# Then open http://<this computer>:8080/admin. The first visit asks for the
+# Then open http://<this computer>:7654/admin. The first visit asks for the
 # one-time setup code from the log (`docker compose logs | grep "setup code"`),
 # creates the admin password and walks you through the printer, filaments and
 # shop details. Everything is kept in ./data; back that folder up.
@@ -26,8 +26,8 @@ services:
       # Plain HTTP. Put your reverse proxy in front for HTTPS, and tell the shop
       # about it in admin → Settings → Server. On a server reachable from the
       # internet, publish to loopback or your LAN address only, e.g.
-      # "127.0.0.1:8080:8080".
-      - "${PRINT_PORT:-8080}:8080"
+      # "127.0.0.1:7654:7654".
+      - "${PRINT_PORT:-7654}:7654"
     volumes:
       # Everything durable: database, uploads, PDFs, settings, secrets, backups.
       - ${PRINT_DATA_DIR:-./data}:/data

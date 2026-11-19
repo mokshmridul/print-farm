@@ -27,12 +27,12 @@ docker compose up -d
 docker compose logs | grep "setup code"
 ```
 
-Open `http://<this computer>:8080/admin`, enter the setup code, create the
+Open `http://<this computer>:7654/admin`, enter the setup code, create the
 admin password, and the setup tour walks you through your printer (any of
 OrcaSlicer's 360+, or your own presets), filaments and shop details.
 Everything is kept in `./data`. Update with `docker compose pull && docker
 compose up -d` (the database is backed up first). It serves plain HTTP on
-:8080; put your reverse proxy or Cloudflare Tunnel in front for HTTPS and tell
+:7654; put your reverse proxy or Cloudflare Tunnel in front for HTTPS and tell
 the shop about it in admin → Settings → Server. See
 [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md).
 

@@ -29,14 +29,14 @@ docker compose up -d
 docker compose logs | grep "setup code"
 ```
 
-Open `http://<this computer>:8080/admin`. That's it: everything else is set
+Open `http://<this computer>:7654/admin`. That's it: everything else is set
 in the browser.
 
 Prefer plain `docker run`?
 
 ```bash
 docker run -d --name print-farm --restart unless-stopped \
-  -p 8080:8080 -v ./data:/data -v ./profiles:/profiles:ro \
+  -p 7654:7654 -v ./data:/data -v ./profiles:/profiles:ro \
   --memory 12g --read-only --tmpfs /run:exec,size=64m --tmpfs /tmp:noexec,size=3g \
   --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add KILL \
   --cap-add SETGID --cap-add SETPCAP --cap-add SETUID --security-opt no-new-privileges \
@@ -70,7 +70,7 @@ taking quotes yet" until a printer and a material are set up.
 
 ## Reverse proxy and HTTPS
 
-Customers need HTTPS: point your reverse proxy at the container's port 8080,
+Customers need HTTPS: point your reverse proxy at the container's port 7654,
 then tell the shop about it in **admin → Settings → Server**:
 
 - **Web address**: what customers type, e.g. `https://print.example.com` (for
@@ -82,7 +82,7 @@ then tell the shop about it in **admin → Settings → Server**:
   each visitor's real address; rate limits are per visitor, so without it every
   customer would share one. Choose the header: `X-Real-IP` for nginx-style
   proxies, `CF-Connecting-IP` for a Cloudflare Tunnel. Tick *also open to
-  devices on my network* to keep `http://<server>:8080` working on your LAN.
+  devices on my network* to keep `http://<server>:7654` working on your LAN.
 
 Saving restarts the shop for a few seconds. Your proxy must:
 
@@ -95,14 +95,14 @@ A minimal Caddyfile:
 
 ```
 print.example.com {
-	reverse_proxy 127.0.0.1:8080 {
+	reverse_proxy 127.0.0.1:7654 {
 		header_up X-Real-IP {remote_host}
 	}
 }
 ```
 
 On a server reachable from the internet, publish the port on loopback or your
-LAN address only (`"127.0.0.1:8080:8080"` in the compose file).
+LAN address only (`"127.0.0.1:7654:7654"` in the compose file).
 
 ## Settings: where they live
 

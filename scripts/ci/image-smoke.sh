@@ -156,7 +156,7 @@ while read -r addr; do
   ip=${addr%:*}; p=$((16#${addr#*:}))
   case "$ip" in
     ??????7F|00000000000000000000000001000000) ;;            # 127.0.0.0/8 / ::1
-    *) [ "$p" = 8080 ] || { echo "unexpected listener on port $p ($ip)" >&2; exit 1; } ;;
+    *) [ "$p" = 7654 ] || { echo "unexpected listener on port $p ($ip)" >&2; exit 1; } ;;
   esac
 done <<<"$listeners"
 echo "ok"

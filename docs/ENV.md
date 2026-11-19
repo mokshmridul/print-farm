@@ -10,9 +10,9 @@ which is then shown locked.
 
 | Variable | Required | Default | Notes |
 | --- | --- | --- | --- |
-| `APP_ORIGIN` | no | the web address in Settings → Server, else `http://localhost:8080` | Exact public origin used for CSRF, cookies, CSP/HSTS, and generated links. HTTPS unless it is localhost or a private-network address; no path/query. With an https origin, a direct LAN visit served through `DIRECT_ACCESS=1` gets non-Secure cookies and no HSTS/upgrade-insecure-requests; every other request is treated as HTTPS. |
+| `APP_ORIGIN` | no | the web address in Settings → Server, else `http://localhost:7654` | Exact public origin used for CSRF, cookies, CSP/HSTS, and generated links. HTTPS unless it is localhost or a private-network address; no path/query. With an https origin, a direct LAN visit served through `DIRECT_ACCESS=1` gets non-Secure cookies and no HSTS/upgrade-insecure-requests; every other request is treated as HTTPS. |
 | `PRINT_IMAGE` | compose | `ghcr.io/mokshmridul/print-farm:latest` | Image to run. Every commit on main is published as `:sha-<7 hex>` too. |
-| `PRINT_PORT` | compose | `8080` | What the container's :8080 is published on, e.g. `127.0.0.1:8080` for loopback only (do that on a server reachable from the internet). |
+| `PRINT_PORT` | compose | `7654` | What the container's :7654 is published on, e.g. `127.0.0.1:7654` for loopback only (do that on a server reachable from the internet). |
 | `TRUSTED_PROXY_CIDR` | no | Settings → Server | The one transport source allowed to assert the client IP/scheme: one IPv4 host (no prefix or `/32`) or unbracketed IPv6 host (no prefix or `/128`), or `host` for a proxy on the same computer (the container's gateway); startup rejects subnets, lists, hostnames, and invalid/config syntax. Empty: nothing is trusted and every peer is served as itself. |
 | `REAL_IP_HEADER` | no | `X-Real-IP` | Where that forwarder puts the client address: `X-Real-IP` or `CF-Connecting-IP`. |
 | `DIRECT_ACCESS` | no | `0` | `1`: with `TRUSTED_PROXY_CIDR` set, other peers are served too, each identified by its own address and scheme, instead of getting 403. For LAN access at `http://<PROXY_BIND>:<PROXY_PORT>` beside a tunnel; those visits get non-Secure cookies under their own names. |

@@ -83,7 +83,7 @@ if [ "$claimed" = 0 ] && [ -z "$(admin_password_hash)" ]; then
     printf '%s-%s' "${code:0:4}" "${code:4:4}" > "$SECRETS_DIR/setup-code"
     chmod 0600 "$SECRETS_DIR/setup-code"
   fi
-  where=$(conf APP_ORIGIN "http://<this computer>:8080")
+  where=$(conf APP_ORIGIN "http://<this computer>:7654")
   log "──────────────────────────────────────────────────────────────"
   log " Welcome! Open $where/admin to set up the shop."
   log " First-run setup code: $(<"$SECRETS_DIR/setup-code")"

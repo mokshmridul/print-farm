@@ -114,8 +114,8 @@ guarantee; CI and update automation are the ongoing controls.
 
 ## Operational rules
 
-- Never expose PostgreSQL, Redis, or port 8080 to the public internet. Firewall
-  8080 to the actual reverse-proxy source, set `TRUSTED_PROXY_CIDR` to that one
+- Never expose PostgreSQL, Redis, or port 7654 to the public internet. Firewall
+  7654 to the actual reverse-proxy source, set `TRUSTED_PROXY_CIDR` to that one
   host (it is optional only for a local test with no proxy), and require the
   outer edge to overwrite both IP forwarding headers.
 - Require HTTPS at the public edge, redirect HTTP, emit HSTS there, and omit

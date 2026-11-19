@@ -37,7 +37,7 @@ the current code was deployed:
 - `TRUSTED_PROXY_CIDR` is set to a single exact host address (the relay that
   carries VPS edge traffic; no prefix). Value redacted here; recorded in the
   host env file.
-- Host firewall (DOCKER-USER chain): port 8080 is allowed from that same
+- Host firewall (DOCKER-USER chain): port 7654 is allowed from that same
   single host and **dropped for all other sources**; the INPUT chain carries
   the same pair. Rule counters show the allow rule passing traffic.
 - Discovery was not needed: the pinned address matches the transport peer the
@@ -70,12 +70,12 @@ above plus organic internet traffic on 2026-07-13 from five-plus distinct
 public client addresses across different networks (values redacted). Per-client
 rate-limit keying is real, not collapsed into a shared bucket.
 
-## Check 4 — direct probe to 8080 refused
+## Check 4 — direct probe to 7654 refused
 
 From an on-host, non-relay source (outside the trusted host):
 
 ```
-curl http://<app-host>:8080/api/health -H "X-Real-IP: 192.0.2.55"   → 403
+curl http://<app-host>:7654/api/health -H "X-Real-IP: 192.0.2.55"   → 403
 ```
 
 ```
@@ -85,7 +85,7 @@ peer=<app-host> client=<app-host> … "GET /api/health HTTP/1.1" 403   [13/Jul/2
 The compose nginx refused to proxy for an untrusted transport peer (this
 returned 200 on the pre-hardening image — the backstop is a property of
 today's deploy), and the forged header was not adopted (`client` stayed the
-peer address). Off-host sources cannot reach 8080 at all (firewall drop,
+peer address). Off-host sources cannot reach 7654 at all (firewall drop,
 check 1); this on-host probe exercises the nginx backstop behind it.
 
 ## Residual notes

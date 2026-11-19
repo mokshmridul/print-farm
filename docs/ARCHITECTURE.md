@@ -19,7 +19,7 @@ container. Under the s6-overlay supervisor it runs:
   OrcaSlicer, render thumbnails, and perform the daily retention sweep. The
   orchestrator runs as root so it can drop every Orca and parse job to its own
   credential-free uid.
-- **nginx** — the only listener reachable from outside the container (:8080,
+- **nginx** — the only listener reachable from outside the container (:7654,
   plain HTTP): per-route body limits, client-IP trust, log hygiene.
 
 Each process gets its environment built from scratch by its run script — an
@@ -38,7 +38,7 @@ They share three workspace packages:
 ```
    VPS host nginx (print.example.com, TLS)
                 │ Tailscale
-                ▼ :8080
+                ▼ :7654
  ┌──────────────────────── print-farm container ─────────────────────────┐
  │  nginx ──▶ web (Next, :3000) ──▶ PostgreSQL (:5432)                    │
  │                 │                  ▲                                   │

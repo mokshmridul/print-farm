@@ -50,7 +50,7 @@ docker run -d --name "stub-$$" --network "container:proxy-$$" "$NGINX_IMAGE" \
 # Wait for the listener, not for the config.
 #
 # `nginx -t` only proves the template rendered — it runs a throwaway process and
-# says nothing about whether the master has bound :8080, or whether the stub
+# says nothing about whether the master has bound :7654, or whether the stub
 # upstream is answering yet. Breaking on it raced the real thing into being, and
 # the first check then died on a bare "connection refused" with nothing to say
 # why. Probe both hops for an actual HTTP status line instead.
@@ -60,7 +60,7 @@ probe() { # container url
 
 ready=""
 for _ in $(seq 1 60); do
-  if probe "stub-$$" http://127.0.0.1:3000/ && probe "proxy-$$" http://127.0.0.1:8080/; then
+  if probe "stub-$$" http://127.0.0.1:3000/ && probe "proxy-$$" http://127.0.0.1:7654/; then
     ready=yes
     break
   fi
@@ -83,7 +83,7 @@ check() {
   code=$(docker run --rm --network "$NET" --ip "$CLIENT_IP" "$NGINX_IMAGE" sh -c "
     head -c $((kib * 1024)) /dev/zero > /tmp/body
     curl -s -o /dev/null -w '%{http_code}' -X POST --data-binary @/tmp/body \
-      -H 'Content-Type: application/octet-stream' http://proxy-$$:8080$path
+      -H 'Content-Type: application/octet-stream' http://proxy-$$:7654$path
   " 2>/dev/null || true)
 
   if [ -z "$code" ] || [ "$code" = "000" ]; then
