@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,8 +12,11 @@ import {
   integrationConnection,
 } from "./support/connections";
 
-// The configured printer (vitest.integration.config.ts): every slice key names it.
-const PRINTER_ID = (JSON.parse(readFileSync(process.env.PRINTER_SPEC_FILE!, "utf8")) as { id: string }).id;
+// The shop's printer as the routes see it: the configured test printer
+// (vitest.integration.config.ts) plus the revision of the live presets CI
+// seeds. Every slice cache key names it.
+const { getPrinterProfile } = await import("@/lib/printer");
+const PRINTER_ID = (await getPrinterProfile()).id;
 
 const checkoutFixture = vi.hoisted(() => ({
   sessionId: "6a86537f-bbc4-45d8-b9b6-8f4c6efe62ec",
