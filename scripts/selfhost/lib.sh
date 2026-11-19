@@ -183,7 +183,7 @@ env_value() {
 ENV_LAYOUT=(
   "# --- Install (managed by install.sh / update.sh) ---"
   SELFHOST SELFHOST_STATE SELFHOST_VERSION SELFHOST_BRANCH SELFHOST_MODE SELFHOST_DOMAIN
-  COMPOSE_FILE PRINT_IMAGE_REPO PRINT_IMAGE
+  COMPOSE_FILE PRINT_IMAGE_REPO PRINT_IMAGE PRINT_DATA_DIR
   "# --- Network ---"
   APP_ORIGIN PROXY_BIND PROXY_PORT TRUSTED_PROXY_CIDR REAL_IP_HEADER DIRECT_ACCESS PRINT_SUBNET PRINT_GATEWAY
   "# --- App secrets (database and Redis passwords are generated inside the container) ---"
@@ -241,11 +241,77 @@ rand_hex() { openssl rand -hex "${1:-32}"; }
 # directory, exactly as when the owner types `docker compose` there.
 dc() {
   ( cd "$ROOT_DIR" && env -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME -u COMPOSE_PROFILES \
-      -u PRINT_IMAGE -u APP_ORIGIN -u ADMIN_PASSWORD -u ADMIN_PASSWORD_HASH -u SESSION_SECRET \
+      -u PRINT_IMAGE -u PRINT_DATA_DIR -u APP_ORIGIN -u ADMIN_PASSWORD -u ADMIN_PASSWORD_HASH -u SESSION_SECRET \
       docker compose "$@" )
 }
 
 SELFHOST_COMPOSE_FILE="docker-compose.yml:docker/selfhost/compose.selfhost.yml"
+
+# ── Where the data lives ──────────────────────────────────────────────────────
+# Everything durable is the container's /data: a directory on this server when
+# PRINT_DATA_DIR is set (new installs: <install folder>/data), otherwise the
+# named Docker volume earlier installs use.
+
+# An absolute path compose can take as a bind source (no ":" or ",", no "." or
+# ".." parts), and never the install folder or one of its parents: emptying it
+# (uninstall, "start empty") would take the code with it.
+valid_data_dir() {
+  [[ "$1" =~ ^/[A-Za-z0-9._/@+-]*[A-Za-z0-9._@+-]$ ]] || return 1
+  [[ ! "$1" =~ (^|/)\.\.?(/|$) ]] || return 1
+  local d=${1%/} root=${ROOT_DIR%/}
+  [ "$root/" != "${d}/" ] && [[ "$root/" != "$d/"* ]]
+}
+
+# The named data volume, if one exists.
+named_data_volume() {
+  docker volume ls -q --filter label=com.docker.compose.project=print \
+    --filter label=com.docker.compose.volume=data 2>/dev/null | head -n1 || true
+}
+
+# "SOURCE:/data" for a one-off container, wherever the data lives. Empty if it
+# isn't anywhere yet.
+data_mount() {
+  if [ -n "${CFG[PRINT_DATA_DIR]:-}" ]; then
+    printf '%s:/data' "${CFG[PRINT_DATA_DIR]}"
+  else
+    local vol; vol=$(named_data_volume)
+    [ -z "$vol" ] || printf '%s:/data' "$vol"
+  fi
+}
+
+# Human-readable location, for messages.
+data_location() {
+  if [ -n "${CFG[PRINT_DATA_DIR]:-}" ]; then printf '%s' "${CFG[PRINT_DATA_DIR]}"
+  else printf 'the Docker volume %s' "$(named_data_volume)"; fi
+}
+
+dir_has_files() { [ -d "$1" ] && [ -n "$(ls -A "$1" 2>/dev/null)" ]; }
+
+# PRINT_DATA_DIR newly set while the data is still in the named volume: copy it
+# into the directory once, with the container stopped so PostgreSQL's files are
+# consistent. The volume is kept until the owner removes it. Needs
+# CFG[PRINT_IMAGE] present locally (it runs the copy).
+move_data_to_dir() {
+  local dir=${CFG[PRINT_DATA_DIR]:-} vol counts
+  [ -n "$dir" ] || return 0
+  valid_data_dir "$dir" || die "PRINT_DATA_DIR must be an absolute path like $ROOT_DIR/data, not the install folder or above it (got '$dir')."
+  vol=$(named_data_volume)
+  [ -n "$vol" ] || return 0
+  # Already moved, or the directory is in use: leave both alone.
+  dir_has_files "$dir" && return 0
+  head_line "Moving the data to $dir"
+  say "  From the Docker volume $vol. The site is down while it copies."
+  dc stop "$SERVICE" >/dev/null 2>&1 || true
+  mkdir -p "$dir" && chmod 0755 "$dir" || die "Could not create $dir."
+  counts=$(docker run --rm --network none -v "$vol:/from:ro" -v "$dir:/to" --entrypoint sh "${CFG[PRINT_IMAGE]}" -c '
+    set -e
+    cp -a /from/. /to/
+    a=$(find /from | wc -l); b=$(find /to | wc -l)
+    [ "$a" = "$b" ] || { echo "copied $b of $a entries" >&2; exit 1; }
+    echo "$b"') || die "Copying the data failed; it is still in $vol, untouched. Empty $dir and try again."
+  ok "Data moved to $dir ($counts files and folders)"
+  say "  The old volume is kept. Once the site looks right: docker volume rm $vol"
+}
 SERVICE=print-farm
 DEFAULT_IMAGE_REPO="ghcr.io/mokshmridul/print-farm"
 # The installer's default printer; the image slices it with the committed,

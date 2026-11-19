@@ -14,6 +14,7 @@ Passwords embedded in URLs must be percent-encoded.
 | `TRUSTED_PROXY_CIDR` | behind a proxy | empty | The one transport source allowed to assert the client IP/scheme: one IPv4 host (no prefix or `/32`) or unbracketed IPv6 host (no prefix or `/128`); startup rejects subnets, lists, hostnames, and invalid/config syntax. Empty: nothing is trusted and every peer is served as itself. |
 | `REAL_IP_HEADER` | no | `X-Real-IP` | Where that forwarder puts the client address: `X-Real-IP` or `CF-Connecting-IP`. |
 | `DIRECT_ACCESS` | no | `0` | `1`: with `TRUSTED_PROXY_CIDR` set, other peers are served too, each identified by its own address and scheme, instead of getting 403. For LAN access at `http://<PROXY_BIND>:<PROXY_PORT>` beside a tunnel; those visits get non-Secure cookies under their own names. |
+| `PRINT_DATA_DIR` | compose | empty | Host directory mounted at `/data` (absolute path). Empty: the named volume `data` (`print_data`). The self-host installer sets `<install folder>/data`; `update.sh` copies an existing volume into it once when it's newly set. |
 | `PRINT_MEMORY` / `PRINT_TMP_SIZE` | compose | `12g` / `3g` | Memory ceiling for the whole container, and the in-memory `/tmp` the slicer stages models in. |
 
 Despite its historical name, `TRUSTED_PROXY_CIDR` is deliberately a single-host
