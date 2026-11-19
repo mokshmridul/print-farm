@@ -14,6 +14,10 @@ interface HealthSnapshot {
   checkedAt: number;
 }
 
+/** Different after every restart: the browser waits for a new one after
+ *  saving server settings (lib/restart-client.ts). Not secret. */
+const BOOT = Math.random().toString(36).slice(2, 10);
+
 let cached: HealthSnapshot | null = null;
 let pending: Promise<HealthSnapshot> | null = null;
 const CACHE_MS = 5_000;
@@ -45,7 +49,7 @@ export async function GET() {
   }
 
   return NextResponse.json(
-    { ok: cached.ok, db: cached.db, redis: cached.redis },
+    { ok: cached.ok, db: cached.db, redis: cached.redis, boot: BOOT },
     { status: cached.ok ? 200 : 503, headers: { "Cache-Control": "no-store" } },
   );
 }

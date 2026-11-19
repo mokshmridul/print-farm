@@ -40,16 +40,16 @@ worker role and the schema owner each get their own.
 Set:
 
 - `APP_ORIGIN=https://print.example.com`
-- `PROXY_BIND` to the private host address reached by the edge, never
-  `0.0.0.0`
+- `PRINT_PORT` to `<private host address>:8080`, the address reached by the
+  edge, never all interfaces on a public server
 - `TRUSTED_PROXY_CIDR` to the exact source host seen from inside the
   container: one IPv4 address (no prefix or `/32`) or unbracketed IPv6 address
   (no prefix or `/128`). Docker preserves the source address of traffic arriving
-  on a non-loopback `PROXY_BIND`; a proxy on the same host using a loopback bind
+  on a non-loopback published address; a proxy on the same host using a loopback bind
   appears as the Docker network's gateway instead.
-- the admin login: `ADMIN_PASSWORD` (hashed on first boot), a pinned
-  `ADMIN_PASSWORD_HASH` in single quotes, or neither and read the generated one
-  from the first boot's logs
+- the admin login: neither `ADMIN_PASSWORD` nor `ADMIN_PASSWORD_HASH`, and
+  create it on the first visit with the setup code from the logs; or pin one of
+  them (a hash in single quotes)
 - optional provider/business values documented in [ENV.md](ENV.md)
 
 Moving an existing deployment here? Pin its `SESSION_SECRET` in `.env` (admin

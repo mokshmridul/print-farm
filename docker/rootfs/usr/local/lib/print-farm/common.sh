@@ -15,6 +15,10 @@ PDF_DIR=$DATA_DIR/pdfs
 PRINTER_DIR=$DATA_DIR/printer
 RUN_DIR=/run/print-farm
 PROFILES_DIR=/profiles
+CONFIG_DIR=$DATA_DIR/config
+SETTINGS_FILE=$CONFIG_DIR/settings.json
+BACKUP_DIR=$DATA_DIR/backups
+PRINTERS_LIST=/etc/print-farm/printers.tsv
 LIB_DIR=/usr/local/lib/print-farm
 # s6-overlay snapshots the container's environment here, one file per variable.
 CONTAINER_ENV=/run/s6/container_environment
@@ -58,10 +62,73 @@ secret() {
   printf '%s' "$(<"$SECRETS_DIR/$1")"
 }
 
-# The session secret and admin hash may be pinned from the environment (a
-# migrated install keeps its old ones); otherwise init generated them.
+# The session secret may be pinned from the environment (a migrated install
+# keeps its old one); otherwise init generated it.
 session_secret() { local v; v=$(cenv SESSION_SECRET); [ -n "$v" ] && printf '%s' "$v" || secret session-secret; }
-admin_password_hash() { local v; v=$(cenv ADMIN_PASSWORD_HASH); [ -n "$v" ] && printf '%s' "$v" || secret admin-password-hash; }
+
+# The admin password set in the environment, if any: ADMIN_PASSWORD_HASH, or
+# ADMIN_PASSWORD hashed by init this boot. Empty: the owner's own, which the
+# web keeps in the database (created on first visit with the setup code).
+admin_password_hash() {
+  local v; v=$(cenv ADMIN_PASSWORD_HASH)
+  [ -z "$v" ] && [ -s "$RUN_DIR/admin-password-hash" ] && v=$(<"$RUN_DIR/admin-password-hash")
+  printf '%s' "$v"
+}
+
+# ── Server settings ───────────────────────────────────────────────────────────
+# The owner's choices in the browser (web address, reverse proxy, printer from
+# OrcaSlicer's list) live in $SETTINGS_FILE, written by the web. load_settings
+# validates it (read-settings.mjs) into $RUN_DIR/settings.env, NAME=value per
+# line, never evaluated; conf reads one, an environment variable winning.
+load_settings() {
+  local out=$RUN_DIR/settings.env
+  if node /opt/tools/read-settings.mjs "$SETTINGS_FILE" "$PRINTERS_LIST" > "$out.tmp"; then
+    mv "$out.tmp" "$out"
+    chmod 0600 "$out"
+  else
+    rm -f "$out.tmp"
+    log "WARNING: $SETTINGS_FILE could not be read; keeping the settings in use"
+    [ -f "$out" ] || : > "$out"
+    return 1
+  fi
+}
+
+# conf NAME [default]
+conf() {
+  local v line
+  v=$(cenv "$1")
+  if [ -z "$v" ] && [ -r "$RUN_DIR/settings.env" ]; then
+    while IFS= read -r line; do
+      if [ "${line%%=*}" = "$1" ]; then v=${line#*=}; break; fi
+    done < "$RUN_DIR/settings.env"
+  fi
+  printf '%s' "${v:-${2:-}}"
+}
+
+# The container's default gateway: where a reverse proxy on the same computer
+# connects from (through the published port).
+default_gateway() {
+  local hex
+  hex=$(awk '$2 == "00000000" { print $3; exit }' /proc/net/route)
+  [ ${#hex} = 8 ] || return 1
+  printf '%d.%d.%d.%d' "0x${hex:6:2}" "0x${hex:4:2}" "0x${hex:2:2}" "0x${hex:0:2}"
+}
+
+# Render nginx's site config from the proxy settings. "host" trusts the
+# gateway (a proxy on this computer).
+render_nginx() {
+  local cidr
+  cidr=$(conf TRUSTED_PROXY_CIDR)
+  if [ "$cidr" = host ]; then
+    cidr=$(default_gateway) || { log "Could not find the container's gateway to trust"; return 1; }
+    log "Trusting the reverse proxy on this computer ($cidr)"
+  fi
+  TRUSTED_PROXY_CIDR=$cidr REAL_IP_HEADER=$(conf REAL_IP_HEADER X-Real-IP) DIRECT_ACCESS=$(conf DIRECT_ACCESS 0) \
+    "$LIB_DIR/render-nginx.sh" "$LIB_DIR/nginx-site.conf.template" /run/nginx/site.conf.new || return 1
+  chown root:www-data /run/nginx/site.conf.new
+  chmod 0640 /run/nginx/site.conf.new
+  mv /run/nginx/site.conf.new /run/nginx/site.conf
+}
 
 db_url() { # role secret-name
   printf 'postgresql://%s:%s@%s:%s/%s' "$1" "$(secret "$2")" "$PG_HOST" "$PG_PORT" "$DB_NAME"
@@ -93,7 +160,7 @@ pass_env() {
 # Advanced mode: asked for, presets in the profiles folder, or no printer set
 # up at all — then the owner's own printer preset is the only way to one.
 advanced_profiles() {
-  if [ "$(cenv ADVANCED_PROFILES 0)" = 1 ] || [ -f "$RUN_DIR/profiles-folder" ] || [ -z "$(cenv PRINTER_MACHINE)" ]; then
+  if [ "$(cenv ADVANCED_PROFILES 0)" = 1 ] || [ -f "$RUN_DIR/profiles-folder" ] || [ -z "$(conf PRINTER_MACHINE)" ]; then
     echo 1
   else
     echo 0

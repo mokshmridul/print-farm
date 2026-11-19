@@ -2,6 +2,9 @@
 # (Re)generate the shop's slicing profiles into /data/printer from this image's
 # OrcaSlicer presets. Pure JSON work: nothing is sliced, nothing is fetched.
 #
+# Each is the owner's server setting (the first-run tour / admin → Settings →
+# Server, in $SETTINGS_FILE) unless the environment sets it:
+#
 #   PRINTER_MACHINE          exact Orca machine preset, e.g. "Prusa MK4 0.4 nozzle"
 #   PRINTER_MULTI_MATERIAL   1 = AMS/MMU/tool changer (automatic multicolour)
 #   ADVANCED_PROFILES        1 = the owner uploads presets in admin
@@ -16,10 +19,10 @@ PF_COMPONENT=printer
 # shellcheck source=common.sh
 . /usr/local/lib/print-farm/common.sh
 
-machine=$(cenv PRINTER_MACHINE)
+machine=$(conf PRINTER_MACHINE)
 advanced=$(cenv ADVANCED_PROFILES 0)
-multi=$(cenv PRINTER_MULTI_MATERIAL 0)
-name=$(cenv PRINTER_DISPLAY_NAME)
+multi=$(conf PRINTER_MULTI_MATERIAL 0)
+name=$(conf PRINTER_DISPLAY_NAME)
 placeholder=0
 if [ -z "$machine" ]; then
   machine="MyKlipper 0.4 nozzle"

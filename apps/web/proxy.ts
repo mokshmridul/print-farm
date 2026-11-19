@@ -100,7 +100,9 @@ export async function proxy(request: NextRequest) {
 
   // --- admin gate ---
   const isAdminPath = pathname.startsWith("/admin") || pathname.startsWith("/api/admin");
-  const isLogin = pathname === "/admin/login" || pathname === "/api/admin/login";
+  // The first-run claim (create the admin password with the setup code) is
+  // reached before there is any admin to be.
+  const isLogin = pathname === "/admin/login" || pathname === "/api/admin/login" || pathname === "/api/admin/claim";
 
   if (isAdminPath && !isLogin) {
     const authed = await isAdminToken(

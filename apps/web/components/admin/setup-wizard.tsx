@@ -17,6 +17,9 @@ import {
   type SiteProfile,
 } from "@print/shared";
 import type { SlicerProfilesState } from "@/lib/slicer-profiles";
+import type { ServerSettingsView } from "@/lib/server-settings";
+import { currentBoot, waitForRestart } from "@/lib/restart-client";
+import { PrinterPicker } from "./printer-picker";
 import { errorMessage } from "./slicer-profiles-editor";
 
 const API = "/api/admin/slicer-profiles";
@@ -95,11 +98,17 @@ export function SetupWizard({
   initial,
   advanced,
   profile,
+  server,
+  startAt,
 }: {
   initial: SlicerProfilesState;
   advanced: boolean;
   /** The shop's details as stored, or null when they couldn't be read. */
   profile: SiteProfile | null;
+  /** The server settings (web address, printer from OrcaSlicer's list). */
+  server: ServerSettingsView;
+  /** Resume here (after the restart that picking a printer from the list takes). */
+  startAt?: string;
 }) {
   const router = useRouter();
   const [state, setState] = useState(initial);
@@ -112,7 +121,10 @@ export function SetupWizard({
     "shop",
     "done",
   ];
-  const [step, setStep] = useState<Step>("welcome");
+  const [step, setStep] = useState<Step>(() => (steps as string[]).includes(startAt ?? "") ? (startAt as Step) : "welcome");
+  // The printer: one of OrcaSlicer's (set up for the owner) or their own upload.
+  const canPickListed = server.editable && !server.locked.printer;
+  const [printerSource, setPrinterSource] = useState<"list" | "own">("list");
   const [picked, setPicked] = useState<Record<UploadStep, Picked[]>>({ printer: [], process: [], filament: [] });
   const [error, setError] = useState<string | null>(null);
   const [finishing, setFinishing] = useState(false);
@@ -248,6 +260,31 @@ export function SetupWizard({
           <Welcome advanced={advanced} steps={steps} printerName={state.printer.name} />
         ) : isUploadStep(step) ? (
           <>
+            {step === "printer" && canPickListed ? (
+              <div className="flex flex-wrap gap-2 text-sm" role="radiogroup" aria-label="Where your printer comes from">
+                {(
+                  [
+                    ["list", "Pick it from OrcaSlicer's list"],
+                    ["own", "Upload my own OrcaSlicer preset"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={printerSource === value}
+                    onClick={() => setPrinterSource(value)}
+                    className={`rounded-full border px-3 py-1.5 ${printerSource === value ? "border-accent text-accent" : "border-line text-muted"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {step === "printer" && canPickListed && printerSource === "list" ? (
+              <ListedPrinter />
+            ) : (
+            <>
             <UploadIntro step={step} />
             <DropZone
               key={step}
@@ -319,10 +356,13 @@ export function SetupWizard({
                 You can carry on while it test-slices.
               </p>
             ) : null}
+            </>
+            )}
           </>
         ) : step === "shop" ? (
           <ShopDetails
             profile={profile}
+            server={server}
             onSaved={(saved) => {
               setShopName(saved.brandName);
               go(at + 1);
@@ -384,7 +424,7 @@ export function SetupWizard({
 
 function Welcome({ advanced, steps, printerName }: { advanced: boolean; steps: readonly Step[]; printerName: string }) {
   const what: Partial<Record<Step, string>> = {
-    printer: "Drop in your printer, exported from OrcaSlicer. Quotes are sliced with it.",
+    printer: "Pick your printer from OrcaSlicer's list, or drop in your own OrcaSlicer export. Quotes are sliced with it.",
     process: "Your 0.12, 0.16 and 0.20 mm process presets, if the printer bundle didn't bring them.",
     filament: "The filament presets you print with, one per material you sell. No material comes with one, so you need at least one.",
     shop: "Your shop's name, city and contact details for the site, quotes and PDFs.",
@@ -519,7 +559,75 @@ const SHOP_FIELDS: { key: ShopKey; label: string; hint?: string; max: number; mu
 
 /** The shop's identity, saved through admin → Site's own API; everything else
  *  there (accent, materials page, footer) keeps what is stored. */
-function ShopDetails({ profile, onSaved }: { profile: SiteProfile | null; onSaved: (saved: SiteProfile) => void }) {
+/** Pick the printer from OrcaSlicer's list: saved as a server setting, which
+ *  restarts the shop with that printer's profiles; the tour resumes at the
+ *  filaments (the printer's own processes come with it). */
+function ListedPrinter() {
+  const router = useRouter();
+  const [machine, setMachine] = useState("");
+  const [multi, setMulti] = useState(false);
+  const [state, setState] = useState<"idle" | "saving" | "restarting" | "slow">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const use = async () => {
+    setState("saving");
+    setError(null);
+    const before = await currentBoot();
+    const res = await fetch("/api/admin/server-settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...HEADERS },
+      body: JSON.stringify({ printer: { machine, multiMaterial: multi, displayName: "" } }),
+    });
+    if (!res.ok) {
+      setError(await errorMessage(res, "Couldn't save the printer."));
+      setState("idle");
+      return;
+    }
+    setState("restarting");
+    if (await waitForRestart(before)) {
+      router.push("/admin/setup?step=filament");
+      router.refresh();
+    } else setState("slow");
+  };
+  return (
+    <>
+      <p className="text-sm text-muted">
+        Find your printer: its own OrcaSlicer machine and process presets are set up for you. Only single-nozzle, 0.4 mm
+        setups are listed; for anything else, upload your own preset.
+      </p>
+      <PrinterPicker value={machine} onChange={setMachine} disabled={state !== "idle"} />
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={multi} onChange={(e) => setMulti(e.target.checked)} className="size-4 accent-[var(--accent)]" />
+        It has an AMS, MMU or tool changer (automatic multicolour)
+      </label>
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="button" className="btn-pill text-sm disabled:opacity-40" disabled={!machine || state !== "idle"} onClick={() => void use()}>
+          {state === "saving" ? "Saving…" : state === "restarting" ? "Setting up the printer…" : "Use this printer"}
+        </button>
+        <span className="text-xs text-faint">
+          {state === "restarting"
+            ? "The shop restarts with its profiles — about half a minute."
+            : state === "slow"
+              ? "This is taking a while. Reload the page in a minute."
+              : null}
+        </span>
+        {error ? <span className="text-xs text-danger">{error}</span> : null}
+      </div>
+    </>
+  );
+}
+
+function ShopDetails({
+  profile,
+  server,
+  onSaved,
+}: {
+  profile: SiteProfile | null;
+  server: ServerSettingsView;
+  onSaved: (saved: SiteProfile) => void;
+}) {
+  const addressEditable = server.editable && !server.locked.siteAddress;
+  const [siteAddress, setSiteAddress] = useState(server.settings.siteAddress);
+  const [restarting, setRestarting] = useState(false);
   const base = profile ?? DEFAULT_SITE_PROFILE;
   // The neutral default name isn't the owner's choice: start them on a blank.
   const fresh = base.brandName === DEFAULT_SITE_PROFILE.brandName;
@@ -570,7 +678,24 @@ function ShopDetails({ profile, onSaved }: { profile: SiteProfile | null; onSave
         setError(await errorMessage(res, "Saving the shop's details failed."));
         return;
       }
-      onSaved((await res.json()) as SiteProfile);
+      const saved = (await res.json()) as SiteProfile;
+      // The web address is a server setting: saving it restarts the shop.
+      if (addressEditable && siteAddress.trim() !== server.settings.siteAddress) {
+        const before = await currentBoot();
+        const put = await fetch("/api/admin/server-settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", ...HEADERS },
+          body: JSON.stringify({ siteAddress: siteAddress.trim() }),
+        });
+        if (!put.ok) {
+          setError(await errorMessage(put, "The web address couldn't be saved."));
+          return;
+        }
+        setRestarting(true);
+        await waitForRestart(before);
+        setRestarting(false);
+      }
+      onSaved(saved);
     } finally {
       setSaving(false);
     }
@@ -582,6 +707,19 @@ function ShopDetails({ profile, onSaved }: { profile: SiteProfile | null; onSave
         How the shop introduces itself. Only the name is required; the rest, and the accent colour, can be changed any
         time in Site.
       </p>
+      {addressEditable ? (
+        <label className="block text-sm">
+          <span className="font-[600]">Web address</span>
+          <span className="ml-2 text-xs text-faint">What customers type, e.g. https://print.example.com. Optional for now.</span>
+          <input
+            type="url"
+            value={siteAddress}
+            onChange={(e) => setSiteAddress(e.target.value)}
+            placeholder="https://print.example.com"
+            className="input-base mt-1.5 py-2 text-sm"
+          />
+        </label>
+      ) : null}
       <div className="grid gap-4 sm:grid-cols-2">
         {SHOP_FIELDS.map((f) => {
           // A blank name (and the initials that follow it) is the hint below, not an error.
@@ -617,7 +755,7 @@ function ShopDetails({ profile, onSaved }: { profile: SiteProfile | null; onSave
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" className="btn-pill text-sm disabled:opacity-40" disabled={saving || invalid.size > 0} onClick={() => void save()}>
-          {saving ? "Saving…" : "Save and continue"}
+          {restarting ? "Applying the web address…" : saving ? "Saving…" : "Save and continue"}
         </button>
         {invalid.size > 0 ? (
           <span className="text-xs text-faint">{invalid.has("brandName") ? "Give the shop a name to continue." : "Check the highlighted fields."}</span>

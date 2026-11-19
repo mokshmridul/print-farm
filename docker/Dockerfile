@@ -136,11 +136,11 @@ RUN pnpm --filter @print/db generate \
 RUN cd apps/worker && ./node_modules/.bin/esbuild ../web/scripts/hash-password.mjs \
         --bundle --platform=node --format=esm --target=node24 \
         --outfile=/opt/tools/hash-password.mjs
-# The installer's profile sorter (OrcaSlicer exports → profiles/printer|process|
-# filament/), bundled the same way with the shared preset parser.
-RUN cd apps/worker && ./node_modules/.bin/esbuild src/profile-import.ts \
+# The root-side reader of the owner's server settings (/data/config/
+# settings.json), bundled the same way with the shared validation.
+RUN cd apps/worker && ./node_modules/.bin/esbuild src/read-settings.ts \
         --bundle --platform=node --format=esm --target=node24 \
-        --outfile=/opt/tools/sort-profiles.mjs
+        --outfile=/opt/tools/read-settings.mjs
 
 # ---------- runtime ----------
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03
@@ -247,10 +247,14 @@ COPY docker/proxy/nginx.conf /usr/local/lib/print-farm/nginx-site.conf.template
 COPY docker/rootfs/ /
 ARG VERSION=dev
 ARG REVISION=unknown
+# printers.tsv: every printer the shop can be set up with, for the setup tour's
+# list and for checking the owner's choice (vendor, model, preset, build volume).
 RUN chmod 0755 /usr/local/bin/print-farm /usr/local/lib/print-farm/*.sh \
     && find /etc/s6-overlay/s6-rc.d -name run -exec chmod 0755 {} + \
     && printf 'print-farm %s (%s)\n' "${VERSION}" "${REVISION}" > /etc/print-farm/version \
-    && mkdir -p /data /profiles
+    && mkdir -p /data /profiles \
+    && node /app/worker/dist/profile-gen.js list > /etc/print-farm/printers.tsv \
+    && test "$(wc -l < /etc/print-farm/printers.tsv)" -gt 100
 
 LABEL org.opencontainers.image.title="print-farm" \
       org.opencontainers.image.description="Instant 3D-printing quotation system: web, slicing worker, PostgreSQL, Redis and nginx in one image" \

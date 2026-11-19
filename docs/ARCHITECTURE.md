@@ -46,7 +46,7 @@ They share three workspace packages:
  │               Redis (:6379) ◀── worker ──▶ OrcaSlicer / parse jobs     │
  │                 ingest/slice jobs     (own uid each, cleared env)     │
  │                                                                        │
- │  /data (PRINT_DATA_DIR, or the data volume): postgres/ redis/ uploads/ │
+ │  /data (PRINT_DATA_DIR, default ./data): postgres/ redis/ uploads/     │
  │  pdfs/ secrets/ printer/                                               │
  └────────────────────────────────────────────────────────────────────────┘
 ```

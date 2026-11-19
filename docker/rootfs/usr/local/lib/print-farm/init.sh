@@ -23,6 +23,10 @@ install -d -m 0700 -o redis -g redis "$REDIS_DATA"
 install -d -m 0755 -o root -g root "$PRINTER_DIR" "$RUN_DIR"
 install -d -m 2775 -o postgres -g postgres "$PG_SOCKET_DIR"
 install -d -m 0700 -o www-data -g www-data /run/nginx
+# The owner's server settings: written by the web (as the storage user), read
+# and validated by root. Backups taken before an update: root only.
+install -d -m 0700 -o "$STORAGE_UID" -g "$STORAGE_GID" "$CONFIG_DIR"
+install -d -m 0700 -o root -g root "$BACKUP_DIR"
 
 # Durable files belong to the storage uid; the untrusted slicer never receives
 # direct vault access (it works on private staged copies). A volume restored or
@@ -61,29 +65,20 @@ gen_secret postgres-worker-password
 gen_secret redis-password
 [ -n "$(cenv SESSION_SECRET)" ] || gen_secret session-secret
 
-if [ -z "$(cenv ADMIN_PASSWORD_HASH)" ] && [ ! -s "$SECRETS_DIR/admin-password-hash" ]; then
-  password=$(cenv ADMIN_PASSWORD)
-  generated=0
-  if [ -z "$password" ]; then
-    password=$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-20)
-    generated=1
-  fi
-  hash=$(printf '%s' "$password" | node /opt/tools/hash-password.mjs | tail -n1)
-  [[ "$hash" =~ ^\$2[aby]\$1[2-9]\$ ]] || die "Hashing the admin password failed (it must be 12–72 characters)."
-  printf '%s' "$hash" > "$SECRETS_DIR/admin-password-hash"
-  if [ "$generated" = 1 ]; then
-    printf '%s\n' "$password" > "$SECRETS_DIR/initial-admin-password"
-    log "──────────────────────────────────────────────────────────────"
-    log " No admin password was given, so one was generated:"
-    log "   $password"
-    log " Change it with: docker exec -it <container> print-farm admin-password"
-    log " (also saved, root-only, in $SECRETS_DIR/initial-admin-password)"
-    log "──────────────────────────────────────────────────────────────"
-  else
-    log "Admin password set from ADMIN_PASSWORD"
-  fi
-  unset password hash
+# Admin password: ADMIN_PASSWORD_HASH or ADMIN_PASSWORD in the environment wins
+# (hashed here, every boot, into the run directory). Otherwise the owner
+# creates one in the browser on first visit, with the setup code migrate
+# prints; the web keeps it in the database.
+rm -f "$RUN_DIR/admin-password-hash"
+if [ -z "$(cenv ADMIN_PASSWORD_HASH)" ] && [ -n "$(cenv ADMIN_PASSWORD)" ]; then
+  hash=$(cenv ADMIN_PASSWORD | node /opt/tools/hash-password.mjs | tail -n1)
+  [[ "$hash" =~ ^\$2[aby]\$1[2-9]\$ ]] || die "Hashing ADMIN_PASSWORD failed (it must be 12–72 characters)."
+  printf '%s' "$hash" > "$RUN_DIR/admin-password-hash"
+  chmod 0600 "$RUN_DIR/admin-password-hash"
+  log "Admin password set from ADMIN_PASSWORD"
+  unset hash
 fi
+rm -f "$SECRETS_DIR/initial-admin-password"
 chmod 0600 "$SECRETS_DIR"/*
 
 # ── PostgreSQL ────────────────────────────────────────────────────────────────
@@ -121,14 +116,14 @@ chown redis:redis "$RUN_DIR/redis.conf"
 chmod 0600 "$RUN_DIR/redis.conf"
 
 # ── nginx ─────────────────────────────────────────────────────────────────────
-TRUSTED_PROXY_CIDR=$(cenv TRUSTED_PROXY_CIDR) REAL_IP_HEADER=$(cenv REAL_IP_HEADER X-Real-IP) \
-  DIRECT_ACCESS=$(cenv DIRECT_ACCESS 0) \
-  "$LIB_DIR/render-nginx.sh" "$LIB_DIR/nginx-site.conf.template" /run/nginx/site.conf
-chown root:www-data /run/nginx/site.conf
-chmod 0640 /run/nginx/site.conf
+# The owner's server settings first: they choose the proxy and the printer.
+load_settings || true
+render_nginx || die "The reverse-proxy settings can't be applied. Fix them in admin → Settings → Server
+  (or TRUSTED_PROXY_CIDR / REAL_IP_HEADER in the environment), or delete $SETTINGS_FILE."
 
 # ── Printer profiles ──────────────────────────────────────────────────────────
-# PRINTER_MACHINE set: slice with that OrcaSlicer printer's own presets,
+# A printer picked from OrcaSlicer's list (the owner's settings, or
+# PRINTER_MACHINE): slice with its own machine and process presets,
 # generated from this image's Orca (and regenerated when Orca or the choice
 # changes). Unset: no printer yet — a generic stand-in, and no quotes until the
 # owner's own printer preset is live.

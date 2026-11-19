@@ -78,7 +78,7 @@ try; it serves `http://localhost:8080`):
 
 ```bash
 docker compose up -d --build
-docker compose logs | grep -A2 "admin password"
+docker compose logs | grep "setup code"   # then open http://localhost:8080/admin
 ```
 
 `scripts/ci/image-smoke.sh <image>` runs the same end-to-end check CI does. See

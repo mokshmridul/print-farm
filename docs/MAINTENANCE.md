@@ -168,8 +168,8 @@ From the old multi-container stack, or any PostgreSQL holding this schema:
    copied in beside an empty database are gone within seconds.
 5. Pin the old `SESSION_SECRET` in `.env` so sealed admin settings stay readable.
 
-Self-hosted installs do all of this by themselves on their first `update.sh`
-to the single image (see [SELF-HOSTING.md](SELF-HOSTING.md#moving-from-the-old-layout)).
+Coming from an installer-based install of this image instead, copy its data
+folder across (see [SELF-HOSTING.md](SELF-HOSTING.md#moving-from-an-installer-based-install)).
 
 ### Upgrading PostgreSQL
 
@@ -187,8 +187,7 @@ on a new volume instead: copy `secrets/` across before the first start, and
    `ARG ORCA_VERSION` lines), `ORCA_SOURCE_COMMIT` to the commit of the release
    tag (`git ls-remote https://github.com/OrcaSlicer/OrcaSlicer.git refs/tags/v<version>`),
    and the worker's `slicerVersion` fallback in `apps/worker/src/config.ts`.
-3. Re-flatten committed profiles from the tag's `resources/profiles/BBL` and run
-   the calibration-cube smoke gate in [ORCA-PROFILES.md](ORCA-PROFILES.md), then
+3. Run the calibration-cube smoke gate in [ORCA-PROFILES.md](ORCA-PROFILES.md), then
    `scripts/ci/image-smoke.sh`, which slices under the real sandbox uid — a
    root-run check cannot see permission problems in the extracted AppImage.
 4. Scan the extracted runtime and confirm any GUI-only vulnerable assets pruned
@@ -196,9 +195,8 @@ on a new volume instead: copy `secrets/` across before the first start, and
 5. Bump `SLICE_PIPELINE_VERSION` in
    `packages/shared/src/settings-key.ts`. This is mandatory for any slicer,
    machine, process, or filament change that can affect toolpaths.
-6. Regenerate `docker/selfhost/printers.tsv` from the new image (see
-   [SELF-HOSTING.md](SELF-HOSTING.md#for-the-maintainer-shipping-updates-to-self-hosters)).
-7. Rebuild and deploy the image.
+6. Rebuild and deploy the image (it builds its printer list from its own
+   OrcaSlicer).
 
 Old cache rows remain in PostgreSQL but the versioned key makes them harmless
 misses. Never leave them active after a toolpath-affecting upgrade.
@@ -267,9 +265,9 @@ Admin password:
 docker compose exec print-farm print-farm admin-password
 ```
 
-It prompts, stores the new hash in the volume and restarts the web. (If
-`ADMIN_PASSWORD_HASH` is pinned in `.env`, change it there instead and
-`docker compose up -d`.) Changing the hash does **not** revoke already-issued 12-hour admin JWTs. For emergency global
+It prompts and stores the new hash in the database; the next login uses it.
+(If `ADMIN_PASSWORD` or `ADMIN_PASSWORD_HASH` is set in `.env`, change it there
+instead and `docker compose up -d`.) Changing the hash does **not** revoke already-issued 12-hour admin JWTs. For emergency global
 revocation also rotate `SESSION_SECRET`; this invalidates admin sessions,
 anonymous quote sessions, and shipping estimate tokens. It does not revoke
 30-day quotation capabilities; delete the quotation to revoke one immediately.

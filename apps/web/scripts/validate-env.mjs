@@ -44,9 +44,11 @@ if (Buffer.byteLength(sessionSecret, "utf8") < 32 || placeholder.test(sessionSec
   throw new Error("SESSION_SECRET must be at least 32 random bytes");
 }
 
-const adminHash = required("ADMIN_PASSWORD_HASH");
+// Optional: without it the owner's own password (database) is used, created
+// on first visit with the setup code.
+const adminHash = process.env.ADMIN_PASSWORD_HASH ?? "";
 const bcrypt = /^\$2[aby]\$(\d{2})\$[./A-Za-z0-9]{53}$/.exec(adminHash);
-if (!bcrypt || Number(bcrypt[1]) < 12) {
+if (adminHash !== "" && (!bcrypt || Number(bcrypt[1]) < 12)) {
   throw new Error("ADMIN_PASSWORD_HASH must be a bcrypt hash with cost 12 or higher");
 }
 
