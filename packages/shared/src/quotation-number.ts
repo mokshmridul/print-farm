@@ -1,5 +1,5 @@
 /**
- * Quotation numbers: `<PREFIX>-<year>-<sequence>`, e.g. RSP-2026-0042. The
+ * Quotation numbers: `<PREFIX>-<year>-<sequence>`, e.g. PS-2026-0042. The
  * prefix is the shop's own initials (admin → Site, asked by the installer).
  * Every reader accepts any valid prefix, so numbers already issued keep working
  * after a shop changes its initials — the per-year sequence is shared, so a new
@@ -7,15 +7,15 @@
  */
 export const QUOTATION_PREFIX_RE = /^[A-Z]{2,5}$/;
 export const QUOTATION_NUMBER_RE = /^[A-Z]{2,5}-\d{4}-\d{4,}$/;
-export const DEFAULT_QUOTATION_PREFIX = "RSP";
+export const DEFAULT_QUOTATION_PREFIX = "PS";
 
 export function formatQuotationNumber(prefix: string, year: number, sequence: number): string {
   const safe = QUOTATION_PREFIX_RE.test(prefix) ? prefix : DEFAULT_QUOTATION_PREFIX;
   return `${safe}-${year}-${String(sequence).padStart(4, "0")}`;
 }
 
-/** Suggested initials for a shop name: "Acme Prints" → "AP", "print.rish.pw" →
- *  "PRP", "Printery" → "PRI". Always 2–5 letters, falls back to the default. */
+/** Suggested initials for a shop name: "Acme Prints" → "AP", "print.example.com" →
+ *  "PEC", "Printery" → "PRI". Always 2–5 letters, falls back to the default. */
 export function initialsFor(brandName: string): string {
   const words = brandName
     .normalize("NFKD")

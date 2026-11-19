@@ -37,7 +37,7 @@ export async function getStoredMail(): Promise<MailSettings | null> {
 function fromEnv(): MailConfig {
   const resendKey = process.env.RESEND_API_KEY ?? "";
   const to = process.env.MAIL_TO ?? "";
-  const configured = resendKey !== "" && to !== "";
+  const configured = resendKey !== "" && to !== "" && env.contactFrom !== "";
   return {
     source: configured ? "env" : "none",
     live: configured,

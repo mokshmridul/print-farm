@@ -5,7 +5,7 @@ describe("quotation numbers", () => {
   it("formats under the shop's initials, padding the sequence", () => {
     expect(formatQuotationNumber("AP", 2026, 7)).toBe("AP-2026-0007");
     expect(formatQuotationNumber("RSP", 2026, 12345)).toBe("RSP-2026-12345");
-    expect(formatQuotationNumber("bad!", 2026, 1)).toBe("RSP-2026-0001");
+    expect(formatQuotationNumber("bad!", 2026, 1)).toBe("PS-2026-0001");
   });
 
   it("accepts numbers under any valid initials, so old numbers survive a change", () => {
@@ -19,10 +19,10 @@ describe("quotation numbers", () => {
 
   it("suggests initials from the shop name", () => {
     expect(initialsFor("Acme Prints")).toBe("AP");
-    expect(initialsFor("print.rish.pw")).toBe("PRP");
+    expect(initialsFor("print.example.com")).toBe("PEC");
     expect(initialsFor("Printery")).toBe("PRI");
     expect(initialsFor("3D Hub")).toBe("DH");
     expect(initialsFor("Big Red Maker Space Co Ltd")).toBe("BRMSC");
-    expect(initialsFor("a")).toBe("RSP");
+    expect(initialsFor("a")).toBe("PS");
   });
 });

@@ -1,8 +1,8 @@
 # OrcaSlicer profiles & slicing
 
 Every quote is backed by a real headless OrcaSlicer run — no estimation. This
-document covers the pinned version, the committed profiles, and how the worker
-invokes the CLI.
+document covers the pinned version, how a shop's profiles are made, and how
+the worker invokes the CLI.
 
 ## Version
 
@@ -14,8 +14,8 @@ via `xvfb-run` because the CLI still initialises wxWidgets/GL on some paths.
 
 Since 2.5 the AppImage ships its system presets only as compiled per-vendor
 caches (`resources/profiles/<vendor>.opc`, magic `ZCRO`). Everything here that
-reads presets — the flatten script, the worker's profile generation for a
-shop's printer, resolving an uploaded preset's parents — needs them as JSON,
+reads presets — the worker's profile generation for a shop's printer,
+resolving an uploaded preset's parents — needs them as JSON,
 so the image also carries the same release's `resources/profiles` from the
 OrcaSlicer source tag, pinned by commit (`ORCA_SOURCE_COMMIT`), at
 `/opt/orca-profiles`. The build fails unless every vendor's JSON version equals
@@ -23,7 +23,7 @@ the version in its `.opc` header, so a commit from another release can't slip in
 
 2.5 also added `include`: a preset names templates (a printer's G-code, a
 filament family's shared settings) whose settings are layered over its parent,
-in order, under its own keys. Both flatteners resolve it the way OrcaSlicer
+in order, under its own keys. The flattener resolves it the way OrcaSlicer
 does; the CLI never sees an `include`.
 
 The persistent cache version is independently pinned in
@@ -31,91 +31,43 @@ The persistent cache version is independently pinned in
 toolpaths must bump `SLICE_PIPELINE_VERSION`; otherwise old price statistics
 would be reused under the new slicer.
 
-## The committed, flattened profiles
+## A shop's profiles
 
-`apps/worker/profiles/` holds eleven standalone JSON profiles:
+There is no built-in printer and no hand-tuned profile set in the image. A
+shop's profiles come from one of two places:
 
-| File | Source (Bambu A1) |
-| --- | --- |
-| `machine.bbl-a1-04.json` | Bambu Lab A1 0.4 nozzle |
-| `process.0.12.json` / `.0.16.json` / `.0.20.json` | 0.12 Fine / 0.16 Optimal / 0.20 Standard |
-| `filament.pla.json` | Numakers PLA+ (density 1.26) |
-| `filament.pla-aesthetic.json` | Numakers PLA Silk (density 1.32) |
-| `filament.pla-cf.json` | Numakers PLA-CF (density 1.22) |
-| `filament.petg.json` | Numakers PETG HS (density 1.28) |
-| `filament.petg-premium.json` | Numakers PETG-CF (density 1.25) |
-| `filament.abs.json` | Orca Generic ABS @BBL A1 (density 1.04) |
-| `filament.asa.json` | Orca Generic ASA @BBL A1 (density 1.04) |
-| `filament.tpu.json` | Orca Generic TPU @BBL A1 (density 1.24) |
+- **A printer from OrcaSlicer's list** (`PRINTER_MACHINE`).
+  `apps/worker/src/profile-gen.ts` builds the set from the presets this
+  OrcaSlicer ships when the container starts, into `/data/printer`:
+  - `machine.json`: the printer's machine preset;
+  - `process.0.12.json` / `.0.16.json` / `.0.20.json`: its process presets
+    (a missing height is derived from its closest one);
+  - `filament.<tier>.json`: one per material tier, the printer vendor's own
+    "Generic" preset where it has one, otherwise OrcaSlicer's library;
+  - `printer.json`: the printer's description (name, build volume, plate per
+    tier) that the worker and website read.
+- **The owner's own OrcaSlicer presets** (advanced mode: guided setup, admin →
+  Slicer profiles, or the profiles folder). They are swapped into a set
+  generated from OrcaSlicer's generic Klipper (or Marlin / RRF / Repetier)
+  printer. That base is marked `placeholder` in `printer.json`, and the shop
+  takes no quotes until the owner's own printer preset is live.
+
+With no `PRINTER_MACHINE` at all, the container starts in advanced mode on
+that placeholder: customers see "not taking quotes yet", and upload, slice and
+checkout answer `503 SHOP_NOT_READY` until a printer preset passes its test
+slice.
 
 Each material tier maps to one filament profile (`filamentProfile` in
 `apps/worker/src/config.ts`).
 
 **Grams — and therefore price — scale with `filament_density ×
-filament_flow_ratio`**, not density alone. Measured on the 20 mm calibration
-cube at 0.20 mm / 15% (2026-09-12), and reproduced exactly by that product:
-
-| Profile | Density | Flow ratio | Grams |
-| --- | --- | --- | --- |
-| Bambu PLA Basic (previous `filament.pla.json`) | 1.26 | 0.980 | 3.67 |
-| Numakers PLA+ (`filament.pla.json`) | 1.26 | 1.009 | 3.78 |
-| Numakers PLA Silk (`filament.pla-aesthetic.json`) | 1.32 | 0.950 | 3.73 |
-| Numakers PLA-CF (`filament.pla-cf.json`) | 1.22 | 0.950 | 3.45 |
-| Numakers PETG HS (`filament.petg.json`) | 1.28 | 0.980 | 3.73 |
-| Numakers PETG-CF (`filament.petg-premium.json`) | 1.25 | 0.960 | 3.57 |
-| Generic ABS (`filament.abs.json`) | 1.04 | 0.950 | see below |
-| Generic ASA (`filament.asa.json`) | 1.04 | 0.950 | see below |
-| Generic TPU (`filament.tpu.json`) | 1.24 | 1.000 | see below |
-
-Two tiers span several filament lines and slice them all with one preset, so
-some lines in them are quoted slightly light:
-
-- **Aesthetic PLA** uses the Silk preset for matte, metallic, starlight, glow,
-  stone and wood too. Numakers' own Matte preset (density 1.32, flow 1.009)
-  weighs ~6% more than Silk, so matte prints are quoted ~6% under their true
-  filament use. There is no A1 preset for metallic/starlight/glow/stone, nor for
-  wood on the A1.
-- **PETG Premium** uses the PETG-CF preset for translucent PETG too, ~4% lighter
-  than the PETG HS preset that plain translucent would slice with.
-
-Splitting a line into its own tier (and profile) removes its error.
-
-**ABS and ASA** have no supplier preset: `flatten-orca-profiles.py` flattens
-Orca's own `Generic ABS/ASA @BBL A1` and `overlay-numakers-profiles.py` ships
-them base-only (same cleanup as every other profile). The A1 is open-frame and
-Bambu does not recommend ABS/ASA on it (warping on large flat parts, fumes), so
-both tiers ship disabled until the operator chooses to offer them.
-
-**TPU** is shipped the same way, from Orca's `Generic TPU @BBL A1` (95A, max
-3.2 mm³/s, so it prints slowly). It is fed from the external spool, never the
-AMS, and ships disabled.
-
-### Filament profiles: Numakers presets over a Bambu base
-
-The filament profiles are the supplier's own presets from
-<https://wiki.numakers.com/printing-tips/printer-profiles>, committed verbatim in
-`scripts/profile-sources/numakers/`. They are exported flattened but not
-uniformly (PETG-CF carries 73 keys where the rest carry ~108), and any key the CLI
-does not receive falls back to Orca's built-in default. So
-`scripts/overlay-numakers-profiles.py` lays each preset over the flattened Bambu
-base for its family (`scripts/profile-sources/bambu-pla-basic.json` /
-`generic-petg.json`): every key the base has is present, and every value
-Numakers set wins. Re-run it after refreshing a vendor preset.
+filament_flow_ratio`** of the filament preset, not density alone. The
+catalog's densities are informational only.
 
 **Why flattened?** The stock profiles use `inherits:` chains. The OrcaSlicer CLI
 does **not** resolve inheritance when given a profile directly — an un-flattened
-profile yields `filament_density = 0` and empty weights. So each profile is
-flattened (its full inheritance chain merged) once and committed.
-
-### Re-flattening (Orca upgrade or profile change)
-
-`scripts/flatten-orca-profiles.py` walks the `inherits` chain (and `include`s)
-from the release's `resources/profiles/BBL/` — a checkout of the OrcaSlicer tag,
-or `/opt/orca-profiles/BBL` in the image — and writes flattened JSONs,
-validating that `filament_density > 0`. Filament presets land in `scripts/profile-sources/` as
-overlay bases, never in `apps/worker/profiles/`, so re-flattening cannot clobber
-the Numakers profiles. Re-run it against the new AppImage, then re-run
-`overlay-numakers-profiles.py`, then the smoke check below before committing.
+profile yields `filament_density = 0` and empty weights. So every profile is
+flattened (its full inheritance chain and `include`s merged) before it is used.
 
 ## How the worker slices
 
@@ -131,7 +83,7 @@ Per job (`apps/worker/src/orca.ts`):
    ```
    XDG_RUNTIME_DIR=/tmp/xdg xvfb-run -a /opt/orca/AppRun \
      --datadir <tmp> \
-     --load-settings "machine.bbl-a1-04.json;job-process.json" \
+     --load-settings "machine.json;job-process.json" \
      --load-filaments "filament.<material>.json" \
      --orient 1 --arrange 1 --slice 0 \
      --export-3mf out.3mf --outputdir <workdir> <model>
@@ -155,17 +107,11 @@ Thumbnails are written beside the model file under `uploads/thumbs/`.
 
 ## Smoke / upgrade gate
 
-Last run for 2.4.2 → 2.5.1 (2026-11-18): all 8 tiers × 3 layer heights slice
-on both. Grams moved −0.3% to +0.9% (PLA at 0.20 mm: 3.78 → 3.81 g), print
-times 0.3–7% shorter (ABS/ASA the most). Bambu's own 0.20 mm Standard A1
-process now uses grid instead of crosshatch infill.
-
-
 After any Orca or profile change, slice the bundled calibration cube
 (`apps/worker/test-fixtures/calibration-cube.stl`) for every material × three
 layer heights and confirm the reported grams land in a sane band. A 20 mm cube at
 PLA/0.20/15% is ~5 g. If weights come back empty or zero, the inheritance
-flattening is stale — re-run the flatten script.
+flattening is broken.
 Only deploy after updating the pinned AppImage SHA-256 and cache pipeline
 version as well.
 

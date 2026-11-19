@@ -15,7 +15,7 @@ import {
 } from "./xml";
 import { extractZipEntries, isZip } from "./zip";
 
-export const PREARRANGED_PLATE_STL_HEADER = "print.rish.pw prearranged plate";
+export const PREARRANGED_PLATE_STL_HEADER = "print-farm prearranged plate";
 
 const UNIT_TO_MM: Record<string, number> = {
   micron: 0.001,

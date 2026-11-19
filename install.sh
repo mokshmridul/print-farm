@@ -2,7 +2,7 @@
 #
 # Print shop installer — sets up your own copy of this 3D-printing quote site.
 #
-#   curl -fsSL https://raw.githubusercontent.com/zappymussel380/print.rish.pw/main/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/mokshmridul/print-farm/main/install.sh | sudo bash
 #
 # It asks for your shop's name, web address, rates, materials and contact
 # details, then downloads the print-farm image and starts it: one container
@@ -16,7 +16,7 @@
 # (see docs/SELF-HOSTING.md), e.g. `curl … | sudo PS_UNATTENDED=1 PS_BRAND=… bash`.
 set -euo pipefail
 
-PS_REPO="${PS_REPO:-https://github.com/zappymussel380/print.rish.pw.git}"
+PS_REPO="${PS_REPO:-https://github.com/mokshmridul/print-farm.git}"
 PS_BRANCH="${PS_BRANCH:-main}"
 
 # ── Bootstrap: piped from curl, or run outside a checkout ─────────────────────
@@ -26,7 +26,7 @@ bootstrap() {
   local dir answer
   if [ "$(id -u)" -ne 0 ]; then
     echo "Please run the installer with sudo:" >&2
-    echo "  curl -fsSL https://raw.githubusercontent.com/zappymussel380/print.rish.pw/main/install.sh | sudo bash" >&2
+    echo "  curl -fsSL https://raw.githubusercontent.com/mokshmridul/print-farm/main/install.sh | sudo bash" >&2
     exit 1
   fi
   echo "Print shop installer"
@@ -168,7 +168,7 @@ sec_printer() {
       ANS[PRINTER_ADVANCED]=1
       hint "In OrcaSlicer: File → Export → Export Preset Bundle → Printer bundle (.orca_printer), plus any"
       hint "filament presets (.json). Copy them to this server, or upload them in the browser after setup."
-      hint "Every preset is test-sliced before quotes use it; until then they use a generic preset."
+      hint "Every preset is test-sliced before quotes use it. The shop takes no quotes until your printer preset is live."
       # No base question: the owner's uploads replace it. Unattended installs
       # can still start from a listed printer (PS_PRINTER) or PS_PRINTER_BASE.
       case "${PS_PRINTER_BASE:-}" in
@@ -211,10 +211,15 @@ pick_listed_printer() {
     [ -n "$machine" ] || die "PS_PRINTER: no printer called '$PS_PRINTER' (see $PRINTERS_FILE)."
   else
     local -a vendors models
+    unattended && die "Unattended install needs PS_PRINTER: the exact OrcaSlicer printer preset (see $PRINTERS_FILE, 3rd column)."
     mapfile -t vendors < <(cut -f1 "$PRINTERS_FILE" | awk '!seen[$0]++')
-    def=1
+    # No built-in default: the shop's printer is the owner's choice. Re-running
+    # the installer offers the printer chosen last time.
+    local prev=${CFG[PRINTER_MACHINE]:-} prev_vendor=""
+    [ -n "$prev" ] && prev_vendor=$(awk -F'\t' -v m="$prev" '$3==m {print $1; exit}' "$PRINTERS_FILE")
+    def=--required
     for vendor in "${vendors[@]}"; do
-      [ "$vendor" = BBL ] && def=$i
+      [ -n "$prev_vendor" ] && [ "$vendor" = "$prev_vendor" ] && def=$i
       printf '  %3d) %-24s' "$i" "$(vendor_label "$vendor")"
       [ $((i % 3)) -eq 0 ] && echo
       i=$((i + 1))
@@ -224,10 +229,10 @@ pick_listed_printer() {
     ask PRINTER_VENDOR "Printer brand (number)" "$def" valid_menu_index "Pick a number from the list."
     vendor=${vendors[$((ANS[PRINTER_VENDOR] - 1))]}
     mapfile -t models < <(awk -F'\t' -v v="$vendor" '$1==v' "$PRINTERS_FILE")
-    i=1; def=1
+    i=1; def=--required
     for row in "${models[@]}"; do
       IFS=$'\t' read -r _ _ mach bed <<<"$row"
-      [ "$mach" = "$A1_MACHINE" ] && def=$i
+      [ "$mach" = "$prev" ] && def=$i
       # The preset name, not the model: a few models come in variants that share one.
       printf '  %3d) %-44s %s mm\n' "$i" "${mach% 0.4 nozzle}" "${bed//x/ × }"
       i=$((i + 1))

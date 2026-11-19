@@ -30,11 +30,11 @@ export async function getStoredShipping(): Promise<ShippingSettings | null> {
 }
 
 /** The environment's settings, as every install used before admin → Shipping
- *  existed (and print.rish.pw still does). */
+ *  existed. */
 function fromEnv(): ShippingConfig {
   const email = process.env.SHIPROCKET_EMAIL ?? "";
   const password = process.env.SHIPROCKET_PASSWORD ?? "";
-  const configured = email !== "" && password !== "";
+  const configured = email !== "" && password !== "" && env.shiprocketPickupPincode !== "";
   return {
     source: configured ? "env" : "none",
     live: configured,
@@ -79,8 +79,8 @@ export function toAdminView(config: ShippingConfig): ShippingAdminView {
     source: config.source,
     enabled: config.enabled,
     email: config.email,
-    // With nothing set up, the environment's pincode is only docker-compose's
-    // Guwahati default; don't offer it as if the shop had chosen it.
+    // With nothing set up, don't offer an environment pincode as if the shop
+    // had chosen it.
     pickupPincode: config.source === "none" ? "" : config.pickupPincode,
     hasPassword: config.password !== "",
     passwordUnreadable: config.passwordUnreadable,

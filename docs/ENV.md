@@ -49,7 +49,7 @@ quotes (`ADMIN_PASSWORD_HASH='$2a$12$…'`), or double every `$` to `$$`.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `PRINTER_MACHINE` | unset | Unset: the committed, hand-tuned Bambu Lab A1 profiles. Otherwise an exact OrcaSlicer machine preset (`docker/selfhost/printers.tsv`); `init` generates its profiles into `/data/printer` and regenerates them when the choice or OrcaSlicer changes. |
+| `PRINTER_MACHINE` | unset | No default printer. Unset: advanced mode on a generic placeholder, and no quotes until your own OrcaSlicer printer preset is live. Otherwise an exact OrcaSlicer machine preset (`docker/selfhost/printers.tsv`); `init` generates its profiles into `/data/printer` and regenerates them when the choice or OrcaSlicer changes. |
 | `PRINTER_MULTI_MATERIAL` | `0` | `1` for an AMS/MMU/tool changer (automatic multicolour). |
 | `PRINTER_ADVANCED` (`ADVANCED_PROFILES` in the container) | `0` | `1`: the owner uploads OrcaSlicer presets in admin → Slicer profiles. |
 | `PRINTER_DISPLAY_NAME` | | The printer's name in customer copy. |
@@ -62,11 +62,11 @@ quotes (`ADMIN_PASSWORD_HASH='$2a$12$…'`), or double every `$` to `$$`.
 | `CONTACT_EMAIL` | empty | Unused. The public contact email, phone and address are set in admin → Site. |
 | `GOOGLE_MAPS_EMBED_URL` | empty | Optional exact Google Maps HTTPS embed URL; enables Google in CSP `frame-src`. |
 | `RESEND_API_KEY` / `MAIL_TO` | none | Contact-form delivery through Resend, used until admin → Settings → Email is saved (which also offers SMTP and replaces all three). Without either, the contact page shows WhatsApp and the shop's details instead of a form. Messages contain the submitted name, email, subject, and message. |
-| `CONTACT_FROM` | `print.rish.pw <contact@rish.pw>` | Verified Resend sender (until admin → Settings → Email is saved). |
+| `CONTACT_FROM` | unset (mail off) | Verified Resend sender (until admin → Settings → Email is saved). |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | empty | Both enable order notifications containing customer/order details and static, PII-free operator alerts. These remain web-only secrets. |
 | `TELEGRAM_MESSAGE_THREAD_ID` | empty | Optional positive Telegram forum topic ID. |
 | `SHIPROCKET_EMAIL` / `SHIPROCKET_PASSWORD` | none | Optional API-user credentials for shipping estimates; do not use the dashboard login. Used until admin → Shipping is saved, which then replaces all three. Without either, the quote page has no shipping estimator. |
-| `SHIPROCKET_PICKUP_PINCODE` | `781001` | Workshop origin pincode (until admin → Shipping is saved). |
+| `SHIPROCKET_PICKUP_PINCODE` | unset (shipping off) | Workshop origin pincode (until admin → Shipping is saved). |
 
 Treat third-party configuration as a privacy decision, not only a technical
 one. Review vendor retention/access terms before enabling it.
@@ -99,7 +99,7 @@ one. Review vendor retention/access terms before enabling it.
 | `ORCA_VERSION` | `2.5.1` | Must agree with the pinned image/cache pipeline version. |
 | `STEP_CONVERT_BIN` | `/usr/bin/occt-draw` | OpenCASCADE DRAW harness used to tessellate STEP uploads inside the parse sandbox (baked into the worker image). |
 | `STEP_CONVERT_TIMEOUT_SECONDS` | `120` | Per-file STEP→STL conversion timeout; hard maximum 600 seconds. |
-| `PROFILES_DIR` | worker profiles | Flattened, committed A1 profiles. |
+| `PROFILES_DIR` | `/data/printer` | The printer's generated profile set. |
 | `SLICE_WORK_DIR` | `/tmp/slice-jobs` | Private per-job scratch root. |
 | `SLICER_UID` / `SLICER_GID` | `1002` / `3000` | Base identity for untrusted per-job slicer processes. |
 | `STORAGE_UID` / `STORAGE_GID` | `1001` / `1001` | Durable storage owner. |

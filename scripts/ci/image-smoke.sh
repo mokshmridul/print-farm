@@ -3,6 +3,7 @@
 # root, dropped capabilities, tmpfs /run and /tmp) and prove the whole shop
 # works from the outside:
 #
+#   * with no printer set up (there is no default) the shop takes no quotes;
 #   * every service comes up and the container reports healthy;
 #   * the public pages render and the admin gate redirects;
 #   * one real model is sliced by OrcaSlicer through the public API — under the
@@ -57,7 +58,20 @@ wait_healthy() {
   return 1
 }
 
-echo "== start"
+echo "== start with no printer: no quotes"
+dc up -d --no-build
+wait_healthy
+curl -s "$origin/quote" | grep -q "Coming soon" || { echo "quote page offered quotes with no printer set up" >&2; exit 1; }
+body=$(curl -s -o - -w '\n%{http_code}' -X POST "$origin/api/uploads" \
+  -H "Origin: $origin" -H "X-Requested-With: XMLHttpRequest" \
+  -F "file=@$repo/apps/worker/test-fixtures/calibration-cube.stl;type=model/stl")
+code=${body##*$'\n'}
+echo "$code  POST /api/uploads"
+[ "$code" = 503 ] && grep -q SHOP_NOT_READY <<<"$body" || { echo "upload was not refused: $body" >&2; exit 1; }
+echo "ok"
+
+echo "== pick a printer from OrcaSlicer's list"
+export PRINTER_MACHINE="Prusa MK4 0.4 nozzle"
 dc up -d --no-build
 wait_healthy
 

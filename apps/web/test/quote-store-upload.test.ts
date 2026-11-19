@@ -90,7 +90,7 @@ describe("queued upload state", () => {
   it("invalidates a shipping estimate as soon as another upload starts", () => {
     const store = useQuoteStore.getState();
     store.setShipping({
-      pincode: "781001",
+      pincode: "110001",
       amountPaise: 10000,
       days: "2",
       token: "token",

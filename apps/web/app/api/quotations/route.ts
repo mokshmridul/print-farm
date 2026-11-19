@@ -19,7 +19,7 @@ import {
   summariseItems,
   type MaterialId,
 } from "@print/shared";
-import { getPrinterProfile } from "@/lib/printer";
+import { getPrinterProfile, SHOP_NOT_READY_MESSAGE, shopReady } from "@/lib/printer";
 import { guardMutation, jsonError, readJsonBody } from "@/lib/api-util";
 import { getCatalogAvailability } from "@/lib/catalog-availability";
 import { getPricing } from "@/lib/pricing-settings";
@@ -67,6 +67,7 @@ class CheckoutConflictError extends Error {}
 async function postQuotation(request: NextRequest) {
   const guard = await guardMutation(request, "checkout", RATE_LIMITS.checkout);
   if (guard) return guard;
+  if (!(await shopReady())) return jsonError(503, "SHOP_NOT_READY", SHOP_NOT_READY_MESSAGE);
 
   const sessionId = await getQuoteSessionId();
   if (!sessionId) return jsonError(401, "NO_SESSION", "No quote session");

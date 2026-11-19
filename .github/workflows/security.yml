@@ -234,6 +234,10 @@ jobs:
           WORKER_CONCURRENCY: "1"
         run: |
           set -euo pipefail
+          # A configured printer (a stock OrcaSlicer set): with none the shop
+          # takes no quotes, and every customer route answers SHOP_NOT_READY.
+          export PRINTER_SPEC_FILE="$GITHUB_WORKSPACE/apps/worker/test-fixtures/profile-set/printer.json"
+          export PROFILES_DIR="$GITHUB_WORKSPACE/apps/worker/test-fixtures/profile-set"
           flow_root="$(mktemp -d)"
           web_log="$flow_root/web.log"
           worker_log="$flow_root/worker.log"

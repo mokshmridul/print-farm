@@ -1,10 +1,9 @@
 import type { SliceSettings } from "./quote-types";
 import type { ModelFormat } from "./filename";
-import { DEFAULT_PRINTER_ID } from "./printer";
 
 /** Bump whenever OrcaSlicer or a machine/process/filament profile changes in a
  * way that can affect toolpaths. Old rows remain harmless cache misses. */
-export const SLICE_PIPELINE_VERSION = "orca-2.5.1-a1-v5";
+export const SLICE_PIPELINE_VERSION = "orca-2.5.1-v6";
 
 /**
  * Canonical cache key for a slice-settings combination.
@@ -25,10 +24,9 @@ export function settingsKey(s: SliceSettings): string {
 export function sliceArtifactKey(
   format: ModelFormat,
   s: SliceSettings,
-  printerId: string = DEFAULT_PRINTER_ID,
+  printerId: string,
 ): string {
-  // Another printer slices to different grams and times. The default printer's
-  // keys stay exactly as they always were, so its cached results stay valid.
-  const printer = printerId === DEFAULT_PRINTER_ID ? "" : `@${printerId}`;
-  return `${SLICE_PIPELINE_VERSION}:${format}:${settingsKey(s)}${printer}`;
+  // Another printer (or another revision of the owner's presets) slices to
+  // different grams and times, so the printer is always part of the key.
+  return `${SLICE_PIPELINE_VERSION}:${format}:${settingsKey(s)}@${printerId}`;
 }

@@ -29,7 +29,8 @@ export function sliceJobIdFor(
   fileHash: string,
   format: ModelFormat,
   settings: SliceSettings,
+  printerId: string,
   attemptId: string,
 ): string {
-  return sliceJobId(fileHash, sliceArtifactKey(format, settings), attemptId);
+  return sliceJobId(fileHash, sliceArtifactKey(format, settings, printerId), attemptId);
 }

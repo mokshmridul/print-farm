@@ -103,7 +103,7 @@ signed estimate token bound to pincode, parcel, and amount.
 Body `{ items: [{ modelId, config }], customer, shippingToken? }` (32 KiB).
 Reprices entirely from database slice results, validates any signed shipping
 estimate, atomically claims each model as single-use, allocates an
-`RSP-<year>-<seq>` number, writes the quotation, and attempts a bounded PDF.
+`<PREFIX>-<year>-<seq>` (e.g. `PS-2026-0001`) number, writes the quotation, and attempts a bounded PDF.
 Client totals are ignored.
 
 - per-IP limit: 5/10 minutes

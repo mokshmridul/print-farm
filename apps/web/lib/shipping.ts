@@ -80,7 +80,7 @@ function derive(input: EstimateInput, pickup: string) {
 
 const ESTIMATE_TTL_SECONDS = 30 * 60; // A shown estimate is honoured for 30 min.
 const secretKey = () => new TextEncoder().encode(env.sessionSecret);
-const TOKEN_ISSUER = "print.rish.pw";
+const TOKEN_ISSUER = "print-farm";
 const TOKEN_AUDIENCE = "shipping-estimate";
 
 interface EstimateClaims {

@@ -48,7 +48,7 @@ the current code was deployed:
 Probe sent through the public edge with a forged header:
 
 ```
-curl https://print.rish.pw/api/health -H "X-Real-IP: 192.0.2.99"   → 200
+curl https://print.example.com/api/health -H "X-Real-IP: 192.0.2.99"   → 200
 ```
 
 The proxy log recorded the prober's true egress IP (verified match with the

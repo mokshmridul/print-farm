@@ -47,8 +47,9 @@ services:
       # Normally generated and kept in the volume. Pin it only when moving an
       # existing install (settings sealed with the old one stay readable).
       SESSION_SECRET: ${SESSION_SECRET:-}
-      # Printer: unset = the hand-tuned Bambu Lab A1 profiles. Otherwise an
-      # exact OrcaSlicer machine preset (docker/selfhost/printers.tsv).
+      # Printer: an exact OrcaSlicer machine preset (docker/selfhost/printers.tsv).
+      # There is no default: unset, the shop takes no quotes until you upload
+      # your own OrcaSlicer printer preset (admin → guided setup, or profiles/).
       PRINTER_MACHINE: ${PRINTER_MACHINE:-}
       PRINTER_MULTI_MATERIAL: ${PRINTER_MULTI_MATERIAL:-0}
       ADVANCED_PROFILES: ${PRINTER_ADVANCED:-0}

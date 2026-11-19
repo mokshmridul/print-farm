@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { PageIntro } from "@/components/shell/page-intro";
 import { QuoteBuilder } from "@/components/quote/quote-builder";
 import { env } from "@/lib/env";
-import { getPrinterSpec } from "@/lib/printer";
+import { SHOP_NOT_READY_MESSAGE, getPrinterProfile, getPrinterSpec, shopReady } from "@/lib/printer";
 import { getShippingConfig } from "@/lib/shipping-settings";
 
 export const metadata: Metadata = {
@@ -12,13 +12,20 @@ export const metadata: Metadata = {
 };
 
 export default async function QuotePage() {
-  const shipping = await getShippingConfig();
+  if (!(await shopReady())) {
+    return (
+      <div className="mx-auto max-w-6xl px-5 py-16 sm:py-20">
+        <PageIntro eyebrow="Instant quote" title="Coming soon" lede={`${SHOP_NOT_READY_MESSAGE} Please check back shortly.`} />
+      </div>
+    );
+  }
+  const [shipping, printer] = await Promise.all([getShippingConfig(), getPrinterProfile().catch(() => getPrinterSpec())]);
   return (
     <div className="mx-auto max-w-6xl px-5 py-16 sm:py-20">
       <PageIntro
         eyebrow="Instant quote"
         title="Upload. Slice. Price."
-        lede={`Drop in your models and we'll slice every one with a real ${getPrinterSpec().name} profile. You'll see exact filament, print time and price — then tweak settings and watch the quote update.`}
+        lede={`Drop in your models and we'll slice every one with a real ${printer.name} profile. You'll see exact filament, print time and price — then tweak settings and watch the quote update.`}
       />
       <QuoteBuilder maxModels={env.maxModelsPerSession} maxUploadMb={env.maxUploadMb} shipping={shipping.live} />
     </div>

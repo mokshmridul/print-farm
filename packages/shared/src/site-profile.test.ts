@@ -13,16 +13,16 @@ import { DEFAULT_SITE_PROFILE, listJoin, splitBrand } from "./site-profile";
 import { findSiteProfileIssues, normalizeSiteProfile } from "./site-profile-schema";
 
 describe("normalizeSiteProfile", () => {
-  it("reproduces print.rish.pw exactly when nothing is stored", () => {
+  it("starts every shop on neutral defaults when nothing is stored", () => {
     const p = normalizeSiteProfile(null);
     expect(p).toEqual({
-      brandName: "print.rish.pw",
+      brandName: "Print Shop",
       tagline: "instant 3D printing quotes",
-      city: "Guwahati",
+      city: "",
       contact: { whatsappNumber: "", email: "", phone: "", address: "" },
-      footerNote: "A rish.pw project",
+      footerNote: "",
       materialsPage: ["PLA", "PETG"],
-      quotationPrefix: "RSP",
+      quotationPrefix: "PS",
       accent: "red",
     });
     // A copy, not the shared default.
@@ -55,7 +55,7 @@ describe("normalizeSiteProfile", () => {
       contact: { email: "not-an-email", whatsappNumber: "12" },
       materialsPage: [],
     });
-    expect(p.brandName).toBe("print.rish.pw");
+    expect(p.brandName).toBe("Print Shop");
     expect(p.contact.email).toBe("");
     expect(p.contact.whatsappNumber).toBe("");
     expect(p.materialsPage).toEqual(["PLA", "PETG"]);
@@ -64,7 +64,7 @@ describe("normalizeSiteProfile", () => {
   it("upper-cases quotation initials and rejects anything that isn't 2–5 letters", () => {
     expect(normalizeSiteProfile({ quotationPrefix: " ap " }).quotationPrefix).toBe("AP");
     for (const bad of ["A", "ABCDEF", "A1", "A-P", 42]) {
-      expect(normalizeSiteProfile({ quotationPrefix: bad }).quotationPrefix).toBe("RSP");
+      expect(normalizeSiteProfile({ quotationPrefix: bad }).quotationPrefix).toBe("PS");
     }
     expect(findSiteProfileIssues({ quotationPrefix: "A1" })).toEqual(["quotationPrefix"]);
   });
@@ -100,7 +100,7 @@ describe("findSiteProfileIssues", () => {
 
 describe("helpers", () => {
   it("splits the brand for the wordmark", () => {
-    expect(splitBrand("print.rish.pw")).toEqual({ accent: "print", rest: ".rish.pw" });
+    expect(splitBrand("print.example.com")).toEqual({ accent: "print", rest: ".example.com" });
     expect(splitBrand("Acme Prints")).toEqual({ accent: "Acme", rest: " Prints" });
     expect(splitBrand("Printery")).toEqual({ accent: "Printery", rest: "" });
     expect(splitBrand(".hidden")).toEqual({ accent: ".hidden", rest: "" });

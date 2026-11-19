@@ -130,7 +130,8 @@ chmod 0640 /run/nginx/site.conf
 # ── Printer profiles ──────────────────────────────────────────────────────────
 # PRINTER_MACHINE set: slice with that OrcaSlicer printer's own presets,
 # generated from this image's Orca (and regenerated when Orca or the choice
-# changes). Unset: the committed, hand-tuned Bambu Lab A1 set.
+# changes). Unset: no printer yet — a generic stand-in, and no quotes until the
+# owner's own printer preset is live.
 "$LIB_DIR/printer-profiles.sh"
 
 # ── Profiles folder ───────────────────────────────────────────────────────────

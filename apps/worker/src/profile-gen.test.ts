@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import {
   conditionMatches,
   generateProfiles,
   listPrinters,
+  main,
   plateFor,
 } from "./profile-gen";
 
@@ -152,26 +153,17 @@ describe("profile-gen", () => {
     expect(plateFor({ textured_plate_temp: ["0"], hot_plate_temp: ["0"], cool_plate_temp: ["35"] })).toBe("Cool Plate");
   });
 
-  it("builds the A1 set from the committed profiles, not the shop's PROFILES_DIR", async () => {
-    // The installer runs `generate` in a worker container whose PROFILES_DIR is
-    // the shop's (still empty) set; copying from there shipped no profiles.
-    const empty = mkdtempSync(join(tmpdir(), "shop-profiles-"));
-    const out = mkdtempSync(join(tmpdir(), "a1-out-"));
-    vi.stubEnv("PROFILES_DIR", empty);
-    vi.resetModules();
-    const { main } = await import("./profile-gen");
-    const { COMMITTED_PROFILES_DIR } = await import("./config");
+  it("marks a generic stand-in as a placeholder, and nothing else", async () => {
+    expect(generateProfiles(new ProfileIndex(root), MACHINE, false).spec).not.toHaveProperty("placeholder");
+    expect(generateProfiles(new ProfileIndex(root), MACHINE, false, undefined, true).spec.placeholder).toBe(true);
+    const out = mkdtempSync(join(tmpdir(), "placeholder-out-"));
     const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
     try {
-      await main(["generate", "Bambu Lab A1 0.4 nozzle", out]);
+      await main(["generate", MACHINE, out, "--placeholder", root]);
     } finally {
       stdout.mockRestore();
-      vi.unstubAllEnvs();
     }
-    const committed = readdirSync(COMMITTED_PROFILES_DIR).filter((f) => f.endsWith(".json") && f !== "printer.json");
-    expect(committed).toContain("machine.bbl-a1-04.json");
-    expect(readdirSync(out).sort()).toEqual([...committed, "printer.json"].sort());
-    rmSync(empty, { recursive: true, force: true });
+    expect(JSON.parse(readFileSync(join(out, "printer.json"), "utf8"))).toMatchObject({ machine: MACHINE, placeholder: true });
     rmSync(out, { recursive: true, force: true });
   });
 });

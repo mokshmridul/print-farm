@@ -9,8 +9,7 @@ import { DEFAULT_ACCENT, type AccentId } from "./accents";
  * The shop's identity and contact details — everything that differs between
  * one print shop running this software and the next. Admin-editable (and
  * seeded by the self-host installer), stored as one JSON app setting. The
- * defaults reproduce print.rish.pw exactly, so a shop that has never saved a
- * profile renders precisely what it always has.
+ * defaults are deliberately generic: a new shop names itself in admin → Site.
  */
 export interface SiteProfile {
   /** Shown in the header wordmark, page titles, PDFs and emails. */
@@ -39,11 +38,11 @@ export interface SiteProfile {
 }
 
 export const DEFAULT_SITE_PROFILE: SiteProfile = {
-  brandName: "print.rish.pw",
+  brandName: "Print Shop",
   tagline: "instant 3D printing quotes",
-  city: "Guwahati",
+  city: "",
   contact: { whatsappNumber: "", email: "", phone: "", address: "" },
-  footerNote: "A rish.pw project",
+  footerNote: "",
   materialsPage: ["PLA", "PETG"],
   quotationPrefix: DEFAULT_QUOTATION_PREFIX,
   accent: DEFAULT_ACCENT,
@@ -60,7 +59,7 @@ export const SITE_PROFILE_LIMITS = {
 } as const;
 
 /** Split a brand for the header wordmark: the accent part is everything before
- *  the first "." or space ("print" + ".rish.pw", "Acme" + " Prints"). A brand
+ *  the first "." or space ("print" + ".example.com", "Acme" + " Prints"). A brand
  *  with neither is accented whole. */
 export function splitBrand(brandName: string): { accent: string; rest: string } {
   const at = brandName.search(/[. ]/);

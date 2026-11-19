@@ -1,5 +1,5 @@
 # Self-host override, loaded through COMPOSE_FILE in the .env that install.sh
-# writes — never by print.rish.pw's own deployment.
+# writes — never by a hand-managed deployment.
 #
 # Pins the container's network so its gateway address is known in advance: a
 # reverse proxy or cloudflared on this same host reaches the published

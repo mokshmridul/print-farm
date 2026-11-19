@@ -9,7 +9,9 @@ import {
   slotFileName,
   slotMismatch,
 } from "./orca-profile";
-import { DEFAULT_PRINTER_SPEC } from "./printer";
+import { UNCONFIGURED_PRINTER_SPEC, printerReady, type PrinterProfileSpec } from "./printer";
+
+const BASE: PrinterProfileSpec = { ...UNCONFIGURED_PRINTER_SPEC, id: "generic", placeholder: undefined };
 
 const machine = {
   printer_settings_id: "My Voron",
@@ -32,7 +34,7 @@ describe("orca profile slots", () => {
   it("names the files the worker loads", () => {
     expect(slotFileName("process:120", "machine.json")).toBe("process.0.12.json");
     expect(slotFileName("filament:PLA_AESTHETIC", "machine.json")).toBe("filament.pla-aesthetic.json");
-    expect(slotFileName("machine", "machine.bbl-a1-04.json")).toBe("machine.bbl-a1-04.json");
+    expect(slotFileName("machine", "machine.json")).toBe("machine.json");
   });
 
   it("recognises a preset's kind from what OrcaSlicer exports", () => {
@@ -96,24 +98,33 @@ describe("applyActiveProfiles", () => {
   ];
 
   it("leaves the printer untouched with nothing live", () => {
-    expect(applyActiveProfiles(DEFAULT_PRINTER_SPEC, [])).toBe(DEFAULT_PRINTER_SPEC);
+    expect(applyActiveProfiles(BASE, [])).toBe(BASE);
   });
 
   it("applies the uploads and carries their revision in the id", () => {
-    const spec = applyActiveProfiles(DEFAULT_PRINTER_SPEC, uploads);
-    expect(spec.id).toBe(`bbl-a1-r${profileRevision(["a", "b"])}`);
+    const spec = applyActiveProfiles(BASE, uploads);
+    expect(spec.id).toBe(`generic-r${profileRevision(["a", "b"])}`);
     expect(spec.id).toMatch(/^[a-z0-9-]+$/);
     expect(spec.bedMm).toEqual([300, 300, 280]);
     expect(spec.nozzleMm).toBe(0.6);
     expect(spec.plates.PETG).toBe("High Temp Plate");
-    expect(spec.plates.PLA).toBe(DEFAULT_PRINTER_SPEC.plates.PLA);
-    expect(spec.name).toBe(DEFAULT_PRINTER_SPEC.name);
-    expect(DEFAULT_PRINTER_SPEC.plates.PETG).toBe("Textured PEI Plate");
+    expect(spec.plates.PLA).toBe(BASE.plates.PLA);
+    expect(spec.name).toBe(BASE.name);
+  });
+
+  it("is ready to quote only once the owner's own printer preset is live", () => {
+    const standIn = { ...BASE, placeholder: true };
+    expect(printerReady(UNCONFIGURED_PRINTER_SPEC)).toBe(false);
+    expect(printerReady(standIn)).toBe(false);
+    // Filament presets alone don't make a printer.
+    expect(printerReady(applyActiveProfiles(standIn, [uploads[1]!]))).toBe(false);
+    expect(printerReady(applyActiveProfiles(standIn, uploads))).toBe(true);
+    expect(printerReady(BASE)).toBe(true);
   });
 
   it("derives the same revision whatever order the rows come in", () => {
-    expect(applyActiveProfiles(DEFAULT_PRINTER_SPEC, [...uploads].reverse()).id).toBe(
-      applyActiveProfiles(DEFAULT_PRINTER_SPEC, uploads).id,
+    expect(applyActiveProfiles(BASE, [...uploads].reverse()).id).toBe(
+      applyActiveProfiles(BASE, uploads).id,
     );
     expect(profileRevision(["a", "b"])).not.toBe(profileRevision(["a", "c"]));
   });

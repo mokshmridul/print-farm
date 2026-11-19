@@ -24,7 +24,7 @@ describe("quote schemas", () => {
     name: " Asha Das ",
     email: " asha@example.com ",
     phone: " +91 98765 43210 ",
-    city: " Guwahati ",
+    city: " Springfield ",
   };
 
   it("keeps customer normalization and the notes default", () => {
@@ -32,7 +32,7 @@ describe("quote schemas", () => {
       name: "Asha Das",
       email: "asha@example.com",
       phone: "+91 98765 43210",
-      city: "Guwahati",
+      city: "Springfield",
       notes: "",
     });
     expect(customerSchema.parse({ ...customer, notes: undefined }).notes).toBe("");
@@ -64,17 +64,19 @@ describe("settingsKey", () => {
     const settings = { material: "PLA", layerHeightUm: 160, infillPct: 25, supports: "auto" } as const;
     // Pinned to the constant, not a literal: bumping the pipeline version is a
     // deliberate cache invalidation, not a test to update.
-    expect(sliceArtifactKey("stl", settings)).toBe(
-      `${SLICE_PIPELINE_VERSION}:stl:PLA:160:25:auto`,
+    expect(sliceArtifactKey("stl", settings, "prusa-mk4-0-4-nozzle")).toBe(
+      `${SLICE_PIPELINE_VERSION}:stl:PLA:160:25:auto@prusa-mk4-0-4-nozzle`,
     );
-    expect(sliceArtifactKey("obj", settings)).not.toBe(sliceArtifactKey("stl", settings));
+    expect(sliceArtifactKey("obj", settings, "p")).not.toBe(sliceArtifactKey("stl", settings, "p"));
+    // Another printer never reuses a slice.
+    expect(sliceArtifactKey("stl", settings, "a")).not.toBe(sliceArtifactKey("stl", settings, "b"));
   });
 });
 
 describe("buildWhatsAppUrl", () => {
   const input = {
     number: "+91 98765-43210",
-    brandName: "print.rish.pw",
+    brandName: "print.example.com",
     quotationNumber: "RSP-2026-0042",
     customerName: "Asha",
     materialsSummary: "2× PLA (black)",
@@ -93,7 +95,7 @@ describe("buildWhatsAppUrl", () => {
   });
 
   it("names the shop the quotation was submitted on", () => {
-    expect(buildWhatsAppMessage(input)).toContain("RSP-2026-0042* on print.rish.pw.");
+    expect(buildWhatsAppMessage(input)).toContain("RSP-2026-0042* on print.example.com.");
     expect(buildWhatsAppMessage({ ...input, brandName: "Acme Prints" })).toContain(
       "on Acme Prints.",
     );
@@ -111,9 +113,9 @@ describe("buildWhatsAppUrl", () => {
       ...input,
       totalPaise: 53050,
       shippingPaise: 8000,
-      shippingPincode: "781001",
+      shippingPincode: "110001",
     });
-    expect(msg).toContain("Shipping: ₹80.00 to 781001 (included in total)");
+    expect(msg).toContain("Shipping: ₹80.00 to 110001 (included in total)");
     expect(msg).not.toContain("not included");
   });
 

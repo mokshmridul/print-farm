@@ -94,9 +94,8 @@ export function presetKind(p: OrcaProfile): ProfileKind | null {
   return null;
 }
 
-// Keys that must never reach the CLI. Export-side bookkeeping (see
-// overlay-numakers-profiles.py: `filament_notes` as a bare "" aborts Orca 2.4.1
-// before slicing), plus everything that would make Orca act beyond slicing:
+// Keys that must never reach the CLI. Export-side bookkeeping (some exports
+// write `filament_notes` as a bare "", which aborts Orca 2.4.1 before slicing), plus everything that would make Orca act beyond slicing:
 // `post_process` runs scripts on the output, the print-host keys upload it
 // somewhere, and `filename_format` names output files.
 const DROP_KEYS = new Set([
@@ -263,6 +262,8 @@ export function applyActiveProfiles(base: PrinterProfileSpec, uploads: readonly 
       if (meta.data.bedMm) spec.bedMm = meta.data.bedMm;
       if (meta.data.nozzleMm) spec.nozzleMm = meta.data.nozzleMm;
       spec.machine = meta.data.presetName;
+      // The owner's own printer is live: the generic stand-in is replaced.
+      delete spec.placeholder;
     }
     const material = slotMaterial(slot);
     if (material) {

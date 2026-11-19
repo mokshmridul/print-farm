@@ -71,12 +71,13 @@ _prompt() {
 }
 
 # ask NAME "Prompt" [default [validator [message]]] — stores ANS[NAME]. Without a
-# default the answer is required. A validator (function) is re-asked until it
-# accepts; an env-supplied answer that fails it is an error when unattended.
+# default (or with the default "--required") the answer is required. A
+# validator (function) is re-asked until it accepts; an env-supplied answer
+# that fails it is an error when unattended.
 ask() {
   local name=$1 q=$2 env="PS_$1" v check="${4:-}" msg="${5:-That does not look right.}"
   local -a def=()
-  [ $# -ge 3 ] && def=("$3")
+  [ $# -ge 3 ] && [ "$3" != "--required" ] && def=("$3")
   if [ -n "${!env+x}" ]; then
     v="${!env}"
     if [ -z "$check" ] || "$check" "$v"; then ANS[$name]="$v"; return; fi
@@ -352,9 +353,6 @@ move_data_to_dir() {
 }
 SERVICE=print-farm
 DEFAULT_IMAGE_REPO="ghcr.io/mokshmridul/print-farm"
-# The installer's default printer; the image slices it with the committed,
-# hand-tuned profiles.
-A1_MACHINE="Bambu Lab A1 0.4 nozzle"
 
 # The compose project name is pinned in docker-compose.yml ("print"), so any
 # other checkout's stack on this machine would be the SAME project. Refuse to

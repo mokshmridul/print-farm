@@ -10,6 +10,9 @@ export default defineConfig({
     // Keep the ordinary workspace test command service-free. Real Postgres /
     // Redis tests have their own config and are invoked explicitly in CI.
     include: ["test/**/*.test.ts"],
+    // A configured printer (a stock OrcaSlicer set): without one the shop
+    // takes no quotes and every customer route answers SHOP_NOT_READY.
+    env: { PRINTER_SPEC_FILE: `${root}/../worker/test-fixtures/profile-set/printer.json` },
     coverage: { provider: "v8", reporter: ["text"] },
   },
   resolve: {

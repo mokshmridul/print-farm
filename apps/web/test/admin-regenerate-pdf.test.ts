@@ -113,7 +113,7 @@ const quotation = {
 };
 
 function request(): NextRequest {
-  return new Request("https://print.rish.pw/api/admin/quotations/quote-id/regenerate-pdf", {
+  return new Request("https://print.example.com/api/admin/quotations/quote-id/regenerate-pdf", {
     method: "POST",
   }) as NextRequest;
 }

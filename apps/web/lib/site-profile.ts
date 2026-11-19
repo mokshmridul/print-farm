@@ -11,8 +11,8 @@ import { siteConfig } from "./site-config";
 export const SITE_PROFILE_KEY = "siteProfile";
 
 /** The shop's name, contact details and page choices. An empty WhatsApp
- *  number falls back to the deployment's WHATSAPP_NUMBER, which is how
- *  print.rish.pw was configured before profiles existed (and is public anyway
+ *  number falls back to the deployment's WHATSAPP_NUMBER, which is how shops
+ *  were configured before profiles existed (and is public anyway
  *  through every wa.me link). The email deliberately has no env fallback: the
  *  never-rendered CONTACT_EMAIL must not start appearing on the contact page
  *  without the owner choosing to publish it here. `cache()` dedupes the read

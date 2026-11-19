@@ -28,7 +28,7 @@ Docker is installed for you if it's missing.
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zappymussel380/print.rish.pw/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/mokshmridul/print-farm/main/install.sh | sudo bash
 ```
 
 It downloads the code to `/opt/print-shop` (you can pick another folder) and
@@ -297,7 +297,7 @@ deployment.
 
 ```bash
 git clone https://github.com/mokshmridul/print-farm.git && cd print-farm
-cp .env.example .env        # set APP_ORIGIN, and the rest as you like
+cp .env.example .env        # set APP_ORIGIN and PRINTER_MACHINE, and the rest as you like
 docker compose up -d
 docker compose logs | grep -A2 "admin password"    # the generated admin password
 ```
@@ -307,12 +307,17 @@ Or with plain `docker run`:
 ```bash
 docker run -d --name print-farm --restart unless-stopped \
   -p 127.0.0.1:8080:8080 -v print-data:/data \
-  -e APP_ORIGIN=https://print.example.com \
+  -e APP_ORIGIN=https://print.example.com -e "PRINTER_MACHINE=Prusa MK4 0.4 nozzle" \
   --memory 12g --read-only --tmpfs /run:exec,size=64m --tmpfs /tmp:noexec,size=3g \
   --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add KILL \
   --cap-add SETGID --cap-add SETPCAP --cap-add SETUID --security-opt no-new-privileges \
   ghcr.io/mokshmridul/print-farm:latest
 ```
+
+There is no default printer. `PRINTER_MACHINE` is any OrcaSlicer printer
+(`docker/selfhost/printers.tsv`, third column); leave it out to upload your
+own OrcaSlicer presets in the admin's guided setup instead. Until a printer is
+set up the shop shows "not taking quotes yet".
 
 Every variable is documented in [`.env.example`](../.env.example) and
 [ENV.md](ENV.md). Maintenance commands run inside the container:
@@ -439,7 +444,7 @@ Set `PS_UNATTENDED=1` and answer every question with a variable. With `sudo`,
 put the variables after `sudo`, or they are dropped:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zappymussel380/print.rish.pw/main/install.sh | sudo \
+curl -fsSL https://raw.githubusercontent.com/mokshmridul/print-farm/main/install.sh | sudo \
   PS_UNATTENDED=1 PS_DIR=/opt/print-shop \
   PS_BRAND="Acme Prints" PS_CITY=Pune PS_DOMAIN=print.acme.in PS_MODE_CHOICE=2 \
   PS_ADMIN_PASSWORD='a long admin password' PS_MATERIALS=1,4,6 PS_SETUP_FEE=120 \
@@ -567,8 +572,9 @@ presets OrcaSlicer ships, inside the image, when the container starts with
 
 Everything is flattened (the CLI doesn't resolve `inherits`) and written to
 `/data/printer` with a `printer.json` describing the printer, which both
-the worker and the website read. The Bambu Lab A1 keeps the hand-tuned
-Numakers profiles print.rish.pw uses.
+the worker and the website read. There is no built-in printer: without
+`PRINTER_MACHINE` the shop takes no quotes until your own OrcaSlicer printer
+preset is live (guided setup or the profiles folder).
 
 In advanced mode, presets the owner uploads are stored in the database
 (`SlicerProfileUpload`). The worker resolves each upload's `inherits` against

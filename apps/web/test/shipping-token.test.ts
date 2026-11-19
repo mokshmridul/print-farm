@@ -20,7 +20,7 @@ vi.mock("@/lib/redis", () => ({ redis: {} }));
 const { issueEstimateToken, verifyEstimateToken } = await import("@/lib/shipping");
 
 // 300 g part → billed 0.5 kg; 50 000 paise declared → ₹500.
-const input = { deliveryPincode: "781001", weightGrams: 300, declaredValuePaise: 50_000 };
+const input = { deliveryPincode: "110001", weightGrams: 300, declaredValuePaise: 50_000 };
 const estimate = { amountPaise: 10_000, days: "3", weightKg: 0.5 };
 
 afterEach(() => {
@@ -32,7 +32,7 @@ describe("shipping estimate token", () => {
   it("round-trips a valid token, returning the signed amount + pincode", async () => {
     const token = await issueEstimateToken(input, estimate);
     const v = await verifyEstimateToken(token, input.weightGrams, input.declaredValuePaise);
-    expect(v).toEqual({ amountPaise: 10_000, days: "3", pincode: "781001" });
+    expect(v).toEqual({ amountPaise: 10_000, days: "3", pincode: "110001" });
   });
 
   it("rejects when the billed weight no longer matches the quote", async () => {

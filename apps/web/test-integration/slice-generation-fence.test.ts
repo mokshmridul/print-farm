@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import type { Queue } from "bullmq";
 import { NextRequest } from "next/server";
@@ -13,6 +14,9 @@ import {
   assertSameDatabaseEndpoint,
   integrationConnection,
 } from "./support/connections";
+
+// The configured printer (vitest.integration.config.ts): every slice key names it.
+const PRINTER_ID = (JSON.parse(readFileSync(process.env.PRINTER_SPEC_FILE!, "utf8")) as { id: string }).id;
 
 const requestSession = vi.hoisted(() => ({
   id: "c316207c-a790-44ae-b769-5e97727f4b74",
@@ -67,7 +71,7 @@ describe("slice retry generation fence", () => {
       infillPct: 15,
       supports: "auto",
     };
-    const settingsKey = sliceArtifactKey("stl", settings);
+    const settingsKey = sliceArtifactKey("stl", settings, PRINTER_ID);
     const clientIp = "192.0.2.173";
 
     try {

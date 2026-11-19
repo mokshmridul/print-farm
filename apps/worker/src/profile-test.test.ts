@@ -20,10 +20,9 @@ vi.mock("@print/db", () => ({
 }));
 
 // config.ts reads its environment on import: slice into a scratch work root,
-// from the committed A1 set.
+// from the fixture printer's set (vitest.config.ts).
 const work = mkdtempSync(join(tmpdir(), "profile-test-work-"));
 vi.stubEnv("SLICE_WORK_DIR", work);
-vi.stubEnv("PROFILES_DIR", "");
 const { ProfileIndex } = await import("./profile-gen.js");
 const { cubeStl, planBatch, processProfileBatch, testSlicesFor } = await import("./profile-test.js");
 
@@ -147,8 +146,8 @@ describe("processProfileBatch", () => {
     await processProfileBatch(BATCH, { index: () => index, slice, advanced: true });
 
     expect(slice).toHaveBeenCalledTimes(1);
-    expect(seen!.files).toEqual(expect.arrayContaining(["machine.bbl-a1-04.json", "process.0.20.json", "printer.json"]));
-    expect(seen!.filament).toMatchObject({ name: "My PLA", filament_flow_ratio: ["0.95"], compatible_printers: ["Bambu Lab A1 0.4 nozzle"] });
+    expect(seen!.files).toEqual(expect.arrayContaining(["machine.json", "process.0.20.json", "printer.json"]));
+    expect(seen!.filament).toMatchObject({ name: "My PLA", filament_flow_ratio: ["0.95"], compatible_printers: ["Prusa MK4 0.4 nozzle"] });
     expect(seen!.filament).not.toHaveProperty("post_process");
     // The test set is gone, and the batch replaced what was live in one go.
     expect(readdirSync(join(work, "profile-sets"))).toEqual([]);
@@ -192,7 +191,7 @@ describe("processProfileBatch", () => {
         filament_type: ["PLA"],
         filament_density: ["1.30"],
         filament_flow_ratio: ["0.98"],
-        compatible_printers: ["Bambu Lab A1 0.4 nozzle"],
+        compatible_printers: ["Prusa MK4 0.4 nozzle"],
       });
       expect(mocks.update).toHaveBeenCalledWith({
         where: { id: "c" },
@@ -220,11 +219,11 @@ describe("processProfileBatch", () => {
         .mockResolvedValueOnce([{ id: "old", slot: "machine", meta: { presetName: "Leftover" }, flattened: klipper }]);
       let machine: Record<string, unknown> | null = null;
       const slice = vi.fn(async (_input, _settings, _workDir, _identity, _progress, set) => {
-        machine = JSON.parse(readFileSync(join(set.dir, "machine.bbl-a1-04.json"), "utf8"));
+        machine = JSON.parse(readFileSync(join(set.dir, "machine.json"), "utf8"));
         return { ok: true, filamentGrams: 3, slicerVersion: "2.4.1", rawMeta: {} };
       });
       await processProfileBatch(BATCH, { index: () => index, slice, advanced: false });
-      expect(machine).toMatchObject({ name: "Bambu Lab A1 0.4 nozzle" });
+      expect(machine).toMatchObject({ name: "Prusa MK4 0.4 nozzle" });
     });
   });
 

@@ -228,7 +228,7 @@ describe("/api/admin/slicer-profiles", () => {
 describe("getPrinterProfile", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("is the installed printer, untouched, until one of the shop's own materials has a profile (print.rish.pw)", async () => {
+  it("is the installed printer, untouched, until one of the shop's own materials has a profile", async () => {
     vi.stubEnv("ADVANCED_PROFILES", "");
     db.findMany.mockResolvedValueOnce([]);
     expect(await getPrinterProfile()).toEqual(getPrinterSpec());
@@ -245,7 +245,7 @@ describe("getPrinterProfile", () => {
       { id: "x", slot: "machine", meta: { presetName: "Leftover", bedMm: [100, 100, 100] } },
     ]);
     const spec = await getPrinterProfile();
-    expect(spec.id).toMatch(/^bbl-a1-r[0-9a-z]{11}$/);
+    expect(spec.id).toMatch(new RegExp(`^${getPrinterSpec().id}-r[0-9a-z]{11}$`));
     expect(spec.filamentPresets?.OTHER_1).toBe("PC (from Generic PC)");
     expect(spec.bedMm).toEqual(getPrinterSpec().bedMm);
   });
@@ -254,7 +254,7 @@ describe("getPrinterProfile", () => {
     vi.stubEnv("ADVANCED_PROFILES", "1");
     db.findMany.mockResolvedValue([{ id: "u1", slot: "filament:PLA", meta: { presetName: "My PLA", plate: "Cool Plate" } }]);
     const spec = await getPrinterProfile();
-    expect(spec.id).toMatch(/^bbl-a1-r[0-9a-z]{11}$/);
+    expect(spec.id).toMatch(new RegExp(`^${getPrinterSpec().id}-r[0-9a-z]{11}$`));
     expect(spec.plates.PLA).toBe("Cool Plate");
   });
 });

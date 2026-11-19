@@ -36,7 +36,7 @@ They share three workspace packages:
   returns a triangle soup, bounding box and volume (no three.js in Node).
 
 ```
-   VPS host nginx (print.rish.pw, TLS)
+   VPS host nginx (print.example.com, TLS)
                 │ Tailscale
                 ▼ :8080
  ┌──────────────────────── print-farm container ─────────────────────────┐
@@ -52,7 +52,7 @@ They share three workspace packages:
 ```
 
 Only nginx listens outside the container. The VPS host nginx terminates TLS for
-`print.rish.pw` and proxies to it over Tailscale — see
+`print.example.com` and proxies to it over Tailscale — see
 [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Request flows
@@ -142,7 +142,7 @@ authoritatively at checkout — client totals are never trusted.
 ### Checkout
 `POST /api/quotations` rebuilds every line from DB slice results and reprices.
 In one transaction it atomically claims each model as single-use, allocates an
-`RSP-<year>-<seq>` number, and persists quotation/items/history. It then renders
+`<PREFIX>-<year>-<seq>` (e.g. `PS-2026-0001`) number, and persists quotation/items/history. It then renders
 a size-bounded PDF under a short Redis lease around the final free-space check
 and exclusive write. Per-IP limits and a global daily circuit breaker bound
 permanent-row/PDF/notification amplification.

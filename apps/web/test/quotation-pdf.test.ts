@@ -59,7 +59,7 @@ function pdfText(pdf: Buffer): string {
 
 function fixture(overrides: Partial<QuotationPdfData> = {}): QuotationPdfData {
   return {
-    brandName: "print.rish.pw",
+    brandName: "print.example.com",
     number: "RSP-2026-0042",
     createdAt: new Date("2026-07-15T10:00:00Z"),
     customer: {

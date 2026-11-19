@@ -10,6 +10,7 @@ import {
   SLICE_QUEUE,
   SLICE_PIPELINE_VERSION,
   UUID_RE,
+  printerReady,
   sliceArtifactKey,
   slicerProfileJobId,
   sliceSettingsSchema,
@@ -138,6 +139,11 @@ async function processJob(job: Job<SliceJobData>): Promise<void> {
   }
   // The owner's live presets in advanced mode, the installer's set otherwise.
   const profileSet = await activeProfileSet();
+  // No printer set up yet (or only the generic stand-in of own-presets mode):
+  // the web takes no quotes then, so a job here is stale or forged.
+  if (!printerReady(profileSet.spec)) {
+    throw new Error("No printer is set up yet: refusing to slice for a customer");
+  }
   if (
     // The key names the printer — and in advanced mode the revision of the
     // owner's presets: a job keyed for other profiles than these must not be

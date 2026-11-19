@@ -78,7 +78,7 @@ that has never saved rates runs on the defaults below.
 | Electricity | ₹10 / kWh × 0.09 kWh per print-hour |
 | Maintenance | ₹0.20 / g |
 | Lead time | 8 print-hours/day + 2 buffer days |
-| Bed | 256 × 256 × 256 mm (Bambu Lab A1) |
+| Bed | the configured printer's build volume |
 
 Colour never affects price; the material tier does. The three premium tiers
 and ABS/ASA/TPU ship **disabled** (`DEFAULT_ENABLED_MATERIALS` in `colours.ts`) — the operator

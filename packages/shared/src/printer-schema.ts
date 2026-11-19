@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { MATERIAL_IDS } from "./quote-types";
-import { DEFAULT_PRINTER_SPEC, type PrinterProfileSpec } from "./printer";
+import { UNCONFIGURED_PRINTER_SPEC, type PrinterProfileSpec } from "./printer";
 
 const dim = z.number().positive().max(2000);
 export const printerSpecSchema = z.object({
@@ -14,14 +14,15 @@ export const printerSpecSchema = z.object({
   plates: z.record(z.string(), z.string()),
   filamentPresets: z.record(z.string(), z.string()).optional(),
   generated: z.boolean(),
+  placeholder: z.boolean().optional(),
 });
 
-/** Parse printer.json; anything invalid or missing falls back to the default,
+/** Parse printer.json; anything invalid or missing means no printer is set up,
  *  with plates filled per material so a partial file can't leave one unset. */
 export function parsePrinterSpec(raw: unknown): PrinterProfileSpec {
   const parsed = printerSpecSchema.safeParse(raw);
-  if (!parsed.success) return DEFAULT_PRINTER_SPEC;
-  const plates = { ...DEFAULT_PRINTER_SPEC.plates };
+  if (!parsed.success) return UNCONFIGURED_PRINTER_SPEC;
+  const plates = { ...UNCONFIGURED_PRINTER_SPEC.plates };
   for (const m of MATERIAL_IDS) {
     const plate = parsed.data.plates[m];
     if (plate) plates[m] = plate;

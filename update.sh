@@ -37,7 +37,7 @@ preflight() {
   [ -f "$ENV_FILE" ] || die "No .env in $ROOT_DIR — install first with install.sh."
   load_env
   # The one guard that keeps this script away from any deployment it did not
-  # create (print.rish.pw's own server included).
+  # create (a hand-managed deployment included).
   [ "${CFG[SELFHOST]:-}" = "1" ] || die "$ENV_FILE was not written by install.sh — update.sh only manages installs it created."
   [ "${CFG[SELFHOST_STATE]:-}" = "installed" ] || die "The install never finished. Run: sudo $ROOT_DIR/install.sh"
   docker info >/dev/null 2>&1 || die "Docker is not running (try: systemctl start docker)."

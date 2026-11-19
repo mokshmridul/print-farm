@@ -90,8 +90,14 @@ pass_env() {
 
 # Advanced profiles (every slot takes the owner's presets): asked for in the
 # environment, or turned on by init because the profiles folder has presets.
+# Advanced mode: asked for, presets in the profiles folder, or no printer set
+# up at all — then the owner's own printer preset is the only way to one.
 advanced_profiles() {
-  if [ "$(cenv ADVANCED_PROFILES 0)" = 1 ] || [ -f "$RUN_DIR/profiles-folder" ]; then echo 1; else echo 0; fi
+  if [ "$(cenv ADVANCED_PROFILES 0)" = 1 ] || [ -f "$RUN_DIR/profiles-folder" ] || [ -z "$(cenv PRINTER_MACHINE)" ]; then
+    echo 1
+  else
+    echo 0
+  fi
 }
 
 svc_restart() { s6-svc -r "/run/service/$1"; }

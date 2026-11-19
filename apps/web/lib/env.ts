@@ -172,9 +172,10 @@ export const env = {
     return Math.min(int("QUOTATION_RETENTION_DAYS", 90), 90);
   },
   // Contact form sender until admin → Settings → Email is saved (see
-  // lib/mail-settings.ts, which reads RESEND_API_KEY / MAIL_TO itself).
+  // lib/mail-settings.ts, which reads RESEND_API_KEY / MAIL_TO itself). No
+  // default: without one, mail stays off until the owner sets a sender.
   get contactFrom() {
-    return process.env.CONTACT_FROM ?? "print.rish.pw <contact@rish.pw>";
+    return (process.env.CONTACT_FROM ?? "").trim();
   },
   // Optional Telegram order notifications. Empty values disable notifications
   // without affecting checkout.
@@ -193,6 +194,6 @@ export const env = {
   // Shiprocket rate calculator, when admin → Shipping hasn't been saved (see
   // lib/shipping-settings.ts, which reads SHIPROCKET_EMAIL/PASSWORD itself).
   get shiprocketPickupPincode() {
-    return process.env.SHIPROCKET_PICKUP_PINCODE ?? "781001";
+    return (process.env.SHIPROCKET_PICKUP_PINCODE ?? "").trim();
   },
 };

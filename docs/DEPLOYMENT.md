@@ -39,7 +39,7 @@ worker role and the schema owner each get their own.
 
 Set:
 
-- `APP_ORIGIN=https://print.rish.pw`
+- `APP_ORIGIN=https://print.example.com`
 - `PROXY_BIND` to the private host address reached by the edge, never
   `0.0.0.0`
 - `TRUSTED_PROXY_CIDR` to the exact source host seen from inside the
@@ -89,7 +89,7 @@ docker compose exec print-farm print-farm health && echo healthy
 ```
 
 After the outer edge is configured, also verify the complete trusted path with
-`curl --fail --silent --show-error https://print.rish.pw/api/health`. A host-side
+`curl --fail --silent --show-error https://print.example.com/api/health`. A host-side
 curl to the private bind may correctly receive 403 because the container's
 nginx accepts HTTP only from `TRUSTED_PROXY_CIDR`.
 
@@ -113,13 +113,13 @@ log_format print_no_args '$remote_addr - $remote_user [$time_local] '
 
 server {
     listen 80;
-    server_name print.rish.pw;
+    server_name print.example.com;
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl http2;
-    server_name print.rish.pw;
+    server_name print.example.com;
     # ssl_certificate / ssl_certificate_key managed by your ACME client
 
     access_log /var/log/nginx/print.access.log print_no_args;

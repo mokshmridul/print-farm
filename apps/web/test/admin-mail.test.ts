@@ -68,7 +68,11 @@ describe("which mail settings are used", () => {
     expect(await getMailConfig()).toMatchObject({ source: "none", live: false });
     vi.stubEnv("RESEND_API_KEY", "re_env");
     vi.stubEnv("MAIL_TO", "env@shop.in");
-    expect(await getMailConfig()).toMatchObject({ source: "env", live: true, provider: "resend", resendKey: "re_env", to: "env@shop.in" });
+    // No built-in sender: mail stays off until one is set.
+    vi.stubEnv("CONTACT_FROM", "");
+    expect(await getMailConfig()).toMatchObject({ source: "none", live: false });
+    vi.stubEnv("CONTACT_FROM", "Shop <hello@shop.in>");
+    expect(await getMailConfig()).toMatchObject({ source: "env", live: true, provider: "resend", resendKey: "re_env", to: "env@shop.in", from: "Shop <hello@shop.in>" });
     db.rows.set("mail", { enabled: false, provider: "resend", to: "owner@shop.in", from: "hello@shop.in", resendKeySealed: "", smtp: {} });
     expect(await getMailConfig()).toMatchObject({ source: "saved", live: false });
   });

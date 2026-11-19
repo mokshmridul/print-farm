@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-/** Eyebrow + display title + lede — the standard rish.pw section opener. */
+/** Eyebrow + display title + lede — the standard section opener. */
 export function PageIntro({
   eyebrow,
   title,

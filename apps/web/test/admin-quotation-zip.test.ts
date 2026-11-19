@@ -73,7 +73,7 @@ const quotation = {
 };
 
 function request(): NextRequest {
-  return new Request(`https://print.rish.pw/api/admin/quotations/${QUOTE_ID}/zip`) as NextRequest;
+  return new Request(`https://print.example.com/api/admin/quotations/${QUOTE_ID}/zip`) as NextRequest;
 }
 
 const ctx = { params: Promise.resolve({ id: QUOTE_ID }) };

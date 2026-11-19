@@ -109,7 +109,7 @@ beforeEach(() => {
         name: "Alert Test",
         email: "customer@example.com",
         phone: "+919876543210",
-        city: "Guwahati",
+        city: "Springfield",
         notes: "",
       },
       items: [

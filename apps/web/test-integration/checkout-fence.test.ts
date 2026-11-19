@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,6 +12,9 @@ import {
   assertSameDatabaseEndpoint,
   integrationConnection,
 } from "./support/connections";
+
+// The configured printer (vitest.integration.config.ts): every slice key names it.
+const PRINTER_ID = (JSON.parse(readFileSync(process.env.PRINTER_SPEC_FILE!, "utf8")) as { id: string }).id;
 
 const checkoutFixture = vi.hoisted(() => ({
   sessionId: "6a86537f-bbc4-45d8-b9b6-8f4c6efe62ec",
@@ -49,7 +53,7 @@ const sliceSettings = {
   infillPct: DEFAULT_MODEL_CONFIG.infillPct,
   supports: DEFAULT_MODEL_CONFIG.supports,
 };
-const settingsKey = sliceArtifactKey("stl", sliceSettings);
+const settingsKey = sliceArtifactKey("stl", sliceSettings, PRINTER_ID);
 
 const originalUploadDir = process.env.UPLOAD_DIR;
 const originalPdfDir = process.env.PDF_DIR;
@@ -149,7 +153,7 @@ function checkoutRequest(): NextRequest {
         name: "Checkout Fence",
         email: "checkout-fence@example.com",
         phone: "+919876543210",
-        city: "Guwahati",
+        city: "Springfield",
         notes: "",
       },
       items: [{ modelId, config: DEFAULT_MODEL_CONFIG }],

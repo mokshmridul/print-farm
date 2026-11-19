@@ -192,7 +192,7 @@ scratch copy under a per-job uid and never needs group access to this mount.
 ## 5. Install and configure the application
 
 Install Docker from Docker's official Debian repository, clone this repository
-under `/opt/print.rish.pw`, and create `.env` from `.env.example`. Add these
+under `/opt/print.example.com`, and create `.env` from `.env.example`. Add these
 vault paths:
 
 ```text
@@ -219,7 +219,7 @@ Create a transfer directory in the old LXC. Stop new requests and workers while
 leaving PostgreSQL up for the dump:
 
 ```bash
-cd /root/print.rish.pw
+cd /root/print.example.com
 install -d -m 0700 transfer
 docker compose stop proxy web worker
 docker compose exec -T postgres sh -c \

@@ -6,7 +6,7 @@
  * description for the rest of the app (build volume, plate per material …).
  *
  *   node dist/profile-gen.js list [profilesRoot]
- *   node dist/profile-gen.js generate "<machine preset name>" <outDir> [--multi-material] [--name "<shown name>"] [profilesRoot]
+ *   node dist/profile-gen.js generate "<machine preset name>" <outDir> [--multi-material] [--placeholder] [--name "<shown name>"] [profilesRoot]
  *
  * The Orca CLI does not resolve `inherits` or `include`, so every profile is
  * flattened the way OrcaSlicer itself loads a system preset: the parent's whole
@@ -18,10 +18,11 @@
  * It reads the presets as JSON. OrcaSlicer 2.5's AppImage ships them only as
  * compiled per-vendor caches (`<vendor>.opc`), so the image carries the same
  * release's JSON presets beside it, at DEFAULT_PROFILES_ROOT (docker/Dockerfile).
- * The Bambu Lab A1 keeps the hand-tuned Numakers set committed in
- * apps/worker/profiles instead (scripts/overlay-numakers-profiles.py).
+ *
+ * `--placeholder` marks the set as a generic stand-in (own-presets mode before
+ * the owner's printer preset is live): the shop takes no quotes with it.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, copyFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -78,7 +79,6 @@ function configOf(profile: Profile): Profile {
   for (const [key, value] of Object.entries(profile)) if (!PRESET_META_KEYS.has(key)) out[key] = value;
   return out;
 }
-export const A1_MACHINE = "Bambu Lab A1 0.4 nozzle";
 
 // ── Index + flattening ────────────────────────────────────────────────────────
 export class ProfileIndex {
@@ -323,6 +323,7 @@ export function generateProfiles(
   machineName: string,
   multiMaterial: boolean,
   displayName?: string,
+  placeholder = false,
 ): GeneratedSet {
   const machine = index.flatten("machine", machineName);
   const choice = listPrinters(index).find((p) => p.machine === machineName);
@@ -378,6 +379,7 @@ export function generateProfiles(
     plates,
     filamentPresets: sources,
     generated: true,
+    ...(placeholder ? { placeholder: true } : {}),
   };
   return { spec, files };
 }
@@ -391,22 +393,16 @@ export function writeProfileSet(set: GeneratedSet, outDir: string) {
   writeFileSync(join(outDir, "printer.json"), `${JSON.stringify(set.spec, null, 2)}\n`, { mode: 0o644 });
 }
 
-/** The A1 keeps the committed, hand-tuned Numakers set; only printer.json is new. */
-export function writeA1Set(committedDir: string, outDir: string, multiMaterial: boolean, spec: PrinterProfileSpec) {
-  mkdirSync(outDir, { recursive: true, mode: 0o755 });
-  for (const name of readdirSync(committedDir)) {
-    if (name.endsWith(".json") && name !== "printer.json") copyFileSync(join(committedDir, name), join(outDir, name));
-  }
-  writeFileSync(join(outDir, "printer.json"), `${JSON.stringify({ ...spec, multiMaterial }, null, 2)}\n`, { mode: 0o644 });
-}
-
 // ── CLI ───────────────────────────────────────────────────────────────────────
 export async function main(argv: string[]) {
   const [command, ...rest] = argv;
   const multi = rest.includes("--multi-material");
+  const placeholder = rest.includes("--placeholder");
   const nameAt = rest.indexOf("--name");
   const displayName = nameAt >= 0 ? rest[nameAt + 1]?.trim().slice(0, 120) : undefined;
-  const args = rest.filter((a, i) => a !== "--multi-material" && (nameAt < 0 || (i !== nameAt && i !== nameAt + 1)));
+  const args = rest.filter(
+    (a, i) => a !== "--multi-material" && a !== "--placeholder" && (nameAt < 0 || (i !== nameAt && i !== nameAt + 1)),
+  );
   if (command === "list") {
     const index = new ProfileIndex(args[0] ?? DEFAULT_PROFILES_ROOT);
     for (const p of listPrinters(index)) {
@@ -416,19 +412,7 @@ export async function main(argv: string[]) {
   }
   if (command === "generate" && args[0] && args[1]) {
     const [machineName, outDir, root] = args as [string, string, string?];
-    if (machineName === A1_MACHINE) {
-      const { DEFAULT_PRINTER_SPEC } = await import("@print/shared");
-      // Never config.profilesDir: the installer runs this with PROFILES_DIR
-      // pointing at the shop's own set — the very dir being replaced.
-      const { COMMITTED_PROFILES_DIR } = await import("./config.js");
-      writeA1Set(COMMITTED_PROFILES_DIR, outDir, multi, {
-        ...DEFAULT_PRINTER_SPEC,
-        ...(displayName ? { name: displayName } : {}),
-      });
-      process.stdout.write(`Bambu Lab A1: using the committed Numakers profiles\n`);
-      return;
-    }
-    const set = generateProfiles(new ProfileIndex(root ?? DEFAULT_PROFILES_ROOT), machineName, multi, displayName);
+    const set = generateProfiles(new ProfileIndex(root ?? DEFAULT_PROFILES_ROOT), machineName, multi, displayName, placeholder);
     writeProfileSet(set, outDir);
     process.stdout.write(
       `${set.spec.name}: ${Object.keys(set.files).length} profiles, bed ${set.spec.bedMm.join("×")} mm\n` +
@@ -439,7 +423,7 @@ export async function main(argv: string[]) {
     );
     return;
   }
-  process.stderr.write('usage: profile-gen.js list [root] | generate "<machine>" <outDir> [--multi-material] [--name "<shown name>"] [root]\n');
+  process.stderr.write('usage: profile-gen.js list [root] | generate "<machine>" <outDir> [--multi-material] [--placeholder] [--name "<shown name>"] [root]\n');
   process.exitCode = 64;
 }
 

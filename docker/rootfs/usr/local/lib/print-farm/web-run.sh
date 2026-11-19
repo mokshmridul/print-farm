@@ -26,8 +26,8 @@ for name in WHATSAPP_NUMBER CONTACT_EMAIL GOOGLE_MAPS_EMBED_URL RESEND_API_KEY M
     SHIPROCKET_EMAIL SHIPROCKET_PASSWORD; do
   pass_env e "$name"
 done
-pass_env e CONTACT_FROM "print.rish.pw <contact@rish.pw>"
-pass_env e SHIPROCKET_PICKUP_PINCODE 781001
+pass_env e CONTACT_FROM
+pass_env e SHIPROCKET_PICKUP_PINCODE
 pass_env e MAX_UPLOAD_MB 300
 pass_env e MAX_SESSION_UPLOAD_MB 900
 pass_env e UPLOAD_WINDOW_MB 900
@@ -41,8 +41,8 @@ pass_env e FILE_RETENTION_DAYS 30
 pass_env e QUOTATION_RETENTION_DAYS 90
 pass_env e LOG_LEVEL info
 e+=("ADVANCED_PROFILES=$(advanced_profiles)")
-# A generated printer set (init → printer-profiles.sh) names the printer and
-# its build volume; without one the web uses the Bambu Lab A1 defaults.
+# The generated printer set (init → printer-profiles.sh) names the printer and
+# its build volume; without one no printer is set up and no quotes are taken.
 [ -f "$PRINTER_DIR/.stamp" ] && e+=("PRINTER_SPEC_FILE=$PRINTER_DIR/printer.json")
 
 cd /app
