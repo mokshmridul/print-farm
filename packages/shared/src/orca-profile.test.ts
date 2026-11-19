@@ -118,3 +118,24 @@ describe("applyActiveProfiles", () => {
     expect(profileRevision(["a", "b"])).not.toBe(profileRevision(["a", "c"]));
   });
 });
+
+describe("placing a filament from the profiles folder", () => {
+  it("sends a filament type that names one tier to it, and nothing else", async () => {
+    const { defaultMaterialFor } = await import("./orca-profile");
+    expect(defaultMaterialFor({ filament_type: ["PLA"] })).toBe("PLA");
+    expect(defaultMaterialFor({ filament_type: ["pla-cf"] })).toBe("PLA_CF");
+    expect(defaultMaterialFor({ filament_type: "PETG" })).toBe("PETG");
+    expect(defaultMaterialFor({ filament_type: ["TPU"] })).toBe("TPU");
+    expect(defaultMaterialFor({ filament_type: ["PETG-CF"] })).toBeNull();
+    expect(defaultMaterialFor({ filament_type: ["PC"] })).toBeNull();
+    expect(defaultMaterialFor({})).toBeNull();
+  });
+
+  it("reads a material folder name in any case, with - or space for _", async () => {
+    const { materialFromFolder } = await import("./orca-profile");
+    expect(materialFromFolder("PETG_PREMIUM")).toBe("PETG_PREMIUM");
+    expect(materialFromFolder("petg-premium")).toBe("PETG_PREMIUM");
+    expect(materialFromFolder("Other 1")).toBe("OTHER_1");
+    expect(materialFromFolder("silk")).toBeNull();
+  });
+});

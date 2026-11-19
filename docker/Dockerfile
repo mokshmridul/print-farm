@@ -136,6 +136,11 @@ RUN pnpm --filter @print/db generate \
 RUN cd apps/worker && ./node_modules/.bin/esbuild ../web/scripts/hash-password.mjs \
         --bundle --platform=node --format=esm --target=node24 \
         --outfile=/opt/tools/hash-password.mjs
+# The installer's profile sorter (OrcaSlicer exports → profiles/printer|process|
+# filament/), bundled the same way with the shared preset parser.
+RUN cd apps/worker && ./node_modules/.bin/esbuild src/profile-import.ts \
+        --bundle --platform=node --format=esm --target=node24 \
+        --outfile=/opt/tools/sort-profiles.mjs
 
 # ---------- runtime ----------
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03
@@ -245,7 +250,7 @@ ARG REVISION=unknown
 RUN chmod 0755 /usr/local/bin/print-farm /usr/local/lib/print-farm/*.sh \
     && find /etc/s6-overlay/s6-rc.d -name run -exec chmod 0755 {} + \
     && printf 'print-farm %s (%s)\n' "${VERSION}" "${REVISION}" > /etc/print-farm/version \
-    && mkdir -p /data
+    && mkdir -p /data /profiles
 
 LABEL org.opencontainers.image.title="print-farm" \
       org.opencontainers.image.description="Instant 3D-printing quotation system: web, slicing worker, PostgreSQL, Redis and nginx in one image" \

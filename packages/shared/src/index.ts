@@ -19,6 +19,7 @@ export * from "./material-helper";
 export * from "./material-helper-schema";
 export * from "./money";
 export * from "./orca-profile";
+export * from "./orca-upload";
 export * from "./order-summary";
 export * from "./pricing";
 export * from "./pricing-settings";

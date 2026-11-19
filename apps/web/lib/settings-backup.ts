@@ -33,7 +33,7 @@ import { envRetention, RETENTION_KEY, saveRetention } from "./retention-settings
 import { getShippingConfig, getStoredShipping, saveShipping, SHIPPING_KEY } from "./shipping-settings";
 import { saveSiteProfile, SITE_PROFILE_KEY } from "./site-profile";
 import { ProfileUploadRejected, parseProfileUpload } from "./slicer-profile-upload";
-import { queueProfileUpload } from "./slicer-profiles";
+import { folderManagedSlots, queueProfileUpload } from "./slicer-profiles";
 import { saveTax, TAX_KEY } from "./tax-settings";
 
 /**
@@ -115,8 +115,10 @@ export async function buildBackup(now = new Date()): Promise<SettingsBackup> {
   const keys = SECTION_NAMES.map((name) => BACKUP_SECTIONS[name].key);
   const [rows, presets] = await Promise.all([
     prisma.appSetting.findMany({ where: { key: { in: keys } } }),
+    // The profiles folder's presets live in the folder on the server; they
+    // come back from there, not from this file.
     prisma.slicerProfileUpload.findMany({
-      where: { status: "ACTIVE", slot: { not: null } },
+      where: { status: "ACTIVE", slot: { not: null }, source: "upload" },
       select: { slot: true, presetName: true, originalName: true, raw: true },
       orderBy: { slot: "asc" },
     }),
@@ -323,6 +325,7 @@ async function restorePresets(presets: z.infer<typeof presetSchema>[], report: R
     where: { status: "ACTIVE", slot: { not: null } },
     select: { slot: true, raw: true },
   });
+  const folder = await folderManagedSlots();
   for (const preset of presets) {
     const what = `Preset "${preset.presetName}"`;
     if (!isProfileSlot(preset.slot)) {
@@ -331,6 +334,10 @@ async function restorePresets(presets: z.infer<typeof presetSchema>[], report: R
     }
     if (!slotInScope(preset.slot, advanced)) {
       report.skipped.push({ what, why: "this install uses the installer's profiles for that (advanced mode is off)" });
+      continue;
+    }
+    if (folder.has(preset.slot)) {
+      report.skipped.push({ what, why: "this slot comes from the profiles folder on the server" });
       continue;
     }
     if (live.some((row) => row.slot === preset.slot && canonical(row.raw) === canonical(preset.raw))) {

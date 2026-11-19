@@ -27,6 +27,8 @@ export interface SlicerProfileSlotState {
   /** The live upload, or null while the slot uses the installed preset. */
   live: ({ presetName: string; originalName: string; testGrams: number | null; checkedAt: string | null } & PresetFacts) | null;
   testing: boolean;
+  /** The profiles folder fills this slot: it takes no uploads here. */
+  fromFolder: boolean;
   /** For a filament slot, what the upload being tested was made with — the
    *  owner's latest choice, shown ahead of what is still live. */
   pending: PresetFacts | null;
@@ -43,6 +45,8 @@ export interface PresetFacts {
 
 export interface SlicerProfileUploadState {
   batchId: string;
+  /** "folder" for presets the profiles folder brought in at startup. */
+  source: "upload" | "folder";
   originalName: string;
   createdAt: string;
   status: "testing" | "failed" | "live" | "replaced";
@@ -87,6 +91,7 @@ export async function getSlicerProfilesState(): Promise<SlicerProfilesState> {
         testGrams: true,
         createdAt: true,
         checkedAt: true,
+        source: true,
       },
     }),
   ]);
@@ -108,8 +113,9 @@ export async function getSlicerProfilesState(): Promise<SlicerProfilesState> {
   const batchRows = await prisma.slicerProfileUpload.findMany({
     where: { batchId: { in: batchIds } },
     orderBy: { createdAt: "asc" },
-    select: { batchId: true, slot: true, originalName: true, presetName: true, status: true, error: true, createdAt: true },
+    select: { batchId: true, slot: true, originalName: true, presetName: true, status: true, error: true, createdAt: true, source: true },
   });
+  const folderSlots = slotsFromFolder(rows);
 
   const slots = PROFILE_SLOTS.filter((slot) => slotInScope(slot, advanced)).map((slot): SlicerProfileSlotState => {
     const live = rows.find((r) => r.slot === slot && r.status === "ACTIVE");
@@ -131,6 +137,7 @@ export async function getSlicerProfilesState(): Promise<SlicerProfilesState> {
           }
         : null,
       testing: inTest !== undefined,
+      fromFolder: folderSlots.has(slot),
       pending: inTest ? (facts.get(inTest.id) ?? {}) : null,
     };
   });
@@ -149,6 +156,7 @@ export async function getSlicerProfilesState(): Promise<SlicerProfilesState> {
             : "replaced";
     return {
       batchId,
+      source: first.source === "folder" ? "folder" : "upload",
       originalName: first.originalName,
       createdAt: first.createdAt.toISOString(),
       status,
@@ -168,6 +176,25 @@ export async function getSlicerProfilesState(): Promise<SlicerProfilesState> {
     uploads,
     busy: uploads.some((u) => u.status === "testing"),
   };
+}
+
+/** Slots the profiles folder fills: live from it, or being tested from it. */
+function slotsFromFolder(rows: readonly { slot: string | null; status: string; source: string }[]): Set<string> {
+  return new Set(
+    rows.flatMap((r) =>
+      r.source === "folder" && r.slot && ["ACTIVE", "PENDING", "TESTING"].includes(r.status) ? [r.slot] : [],
+    ),
+  );
+}
+
+/** The slots the profiles folder fills right now. Uploads to them are refused:
+ *  the folder is the source of truth for what it holds. */
+export async function folderManagedSlots(): Promise<Set<string>> {
+  const rows = await prisma.slicerProfileUpload.findMany({
+    where: { source: "folder", status: { in: ["ACTIVE", "PENDING", "TESTING"] } },
+    select: { slot: true, status: true, source: true },
+  });
+  return slotsFromFolder(rows);
 }
 
 /** Store an upload as one batch and queue its test slice. */

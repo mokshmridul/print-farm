@@ -282,9 +282,16 @@ model SlicerProfileUpload {
   error        String?
   /// Grams of the test cube sliced with this preset live.
   testGrams    Float?
+  /// "upload" (the admin page) or "folder" (the profiles folder, synced when
+  /// the container starts). A slot the folder fills takes no uploads.
+  source       String              @default("upload")
+  /// Folder presets: "<path in the folder>#<sha256 of the file>#<preset name>",
+  /// what each startup sync compares against the files.
+  sourceKey    String?
   createdAt    DateTime            @default(now())
   checkedAt    DateTime?
 
   @@index([status, slot])
   @@index([batchId])
+  @@index([source, status])
 }

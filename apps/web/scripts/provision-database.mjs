@@ -166,10 +166,11 @@ GRANT UPDATE (
 -- slice, writes the resolved preset and marks it live.
 GRANT SELECT ON TABLE "SlicerProfileUpload" TO ${webRole};
 GRANT INSERT (
-  "id", "batchId", "slot", "originalName", "presetName", "raw", "status", "createdAt"
+  "id", "batchId", "slot", "originalName", "presetName", "raw", "status", "source", "createdAt"
 ) ON TABLE "SlicerProfileUpload" TO ${webRole};
 GRANT UPDATE ("status", "error", "checkedAt") ON TABLE "SlicerProfileUpload" TO ${webRole};
-GRANT SELECT, UPDATE ON TABLE "SlicerProfileUpload" TO ${workerRole};
+-- INSERT: the profiles-folder sync records the folder's presets as batches.
+GRANT SELECT, INSERT, UPDATE ON TABLE "SlicerProfileUpload" TO ${workerRole};
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "UploadedModel" TO ${workerRole};
 GRANT SELECT, UPDATE ON TABLE "SliceResult" TO ${workerRole};
 -- Quotation DELETE powers the retention sweep. Cascading foreign keys remove

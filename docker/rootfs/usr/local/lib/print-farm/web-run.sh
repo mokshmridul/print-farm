@@ -40,7 +40,7 @@ pass_env e UPLOAD_RETENTION_HOURS 48
 pass_env e FILE_RETENTION_DAYS 30
 pass_env e QUOTATION_RETENTION_DAYS 90
 pass_env e LOG_LEVEL info
-pass_env e ADVANCED_PROFILES 0
+e+=("ADVANCED_PROFILES=$(advanced_profiles)")
 # A generated printer set (init → printer-profiles.sh) names the printer and
 # its build volume; without one the web uses the Bambu Lab A1 defaults.
 [ -f "$PRINTER_DIR/.stamp" ] && e+=("PRINTER_SPEC_FILE=$PRINTER_DIR/printer.json")

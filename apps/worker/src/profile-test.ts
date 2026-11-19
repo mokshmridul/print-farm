@@ -44,6 +44,7 @@ export interface UploadRow {
   slot: string | null;
   presetName: string;
   raw: unknown;
+  source?: string;
 }
 
 export interface PlannedUpload {
@@ -76,9 +77,11 @@ function metaFor(flat: OrcaProfile, slot: ProfileSlot | null, presetName: string
 
 /** Resolve and place every preset in a batch, without touching disk or DB.
  *  Presets the owner aimed at a slot go first; a bundle's process presets then
- *  take the layer height they print at, if it's one we quote and still free. */
-export function planBatch(rows: readonly UploadRow[], index: Flattener): PlannedUpload[] {
-  const raws = rows.map((r) => r.raw as OrcaProfile);
+ *  take the layer height they print at, if it's one we quote and still free.
+ *  `peers` are further presets a preset may build on (the profiles folder's,
+ *  for a batch from it); only the batch's own rows are placed. */
+export function planBatch(rows: readonly UploadRow[], index: Flattener, peers: readonly OrcaProfile[] = []): PlannedUpload[] {
+  const raws = [...rows.map((r) => r.raw as OrcaProfile), ...peers];
   const taken = new Set<ProfileSlot>();
   const ordered = [...rows].sort((a, b) => Number(!isProfileSlot(a.slot)) - Number(!isProfileSlot(b.slot)));
   return ordered.map((row) => {
@@ -170,6 +173,8 @@ export interface ProfileBatchDeps {
    *  materials' filament slots (slotInScope) — its printer and stock materials
    *  keep the profiles the installer generated. */
   advanced: boolean;
+  /** The profiles folder's presets, as parents for a batch from it. */
+  folderPeers?: () => Promise<OrcaProfile[]>;
 }
 
 let sharedIndex: ProfileIndex | null = null;
@@ -227,7 +232,7 @@ export async function processProfileBatch(batchId: string, deps: ProfileBatchDep
   const rows = await prisma.slicerProfileUpload.findMany({
     where: { batchId, status: { in: ["PENDING", "TESTING"] } },
     orderBy: { createdAt: "asc" },
-    select: { id: true, slot: true, presetName: true, raw: true },
+    select: { id: true, slot: true, presetName: true, raw: true, source: true },
   });
   if (rows.length === 0) return;
   await prisma.slicerProfileUpload.updateMany({
@@ -236,8 +241,9 @@ export async function processProfileBatch(batchId: string, deps: ProfileBatchDep
   });
 
   try {
-    const planned = planBatch(rows, deps.index());
-    const live = planned.filter((p): p is PlannedUpload & { slot: ProfileSlot } => p.slot !== null);
+    const peers = rows.some((r) => r.source === "folder") && deps.folderPeers ? await deps.folderPeers() : [];
+    const planned = planBatch(rows, deps.index(), peers);
+    let live = planned.filter((p): p is PlannedUpload & { slot: ProfileSlot } => p.slot !== null);
     const skipped = planned.filter((p) => p.slot === null);
     if (live.length === 0) {
       throw new ProfileBatchError(skipped[0]?.skipReason ?? "Nothing in this upload could be used.");
@@ -249,11 +255,23 @@ export async function processProfileBatch(batchId: string, deps: ProfileBatchDep
         "Only your own materials' filament presets can be uploaded on this install. Your printer and the other materials use the profiles the installer set up (advanced mode changes that).",
       );
     }
-    const slots = live.map((p) => p.slot);
-    const others = await prisma.slicerProfileUpload.findMany({
-      where: { status: "ACTIVE", slot: { notIn: slots } },
-      select: { id: true, slot: true, meta: true, flattened: true },
+    const active = await prisma.slicerProfileUpload.findMany({
+      where: { status: "ACTIVE" },
+      select: { id: true, slot: true, meta: true, flattened: true, source: true },
     });
+    // An upload never replaces what the profiles folder fills: the web refuses
+    // those slots up front, and a bundle's process presets — placed only here —
+    // are skipped when their height comes from the folder.
+    if (!rows.some((r) => r.source === "folder")) {
+      const folder = new Set(active.filter((a) => a.source === "folder").map((a) => a.slot));
+      for (const p of live.filter((l) => folder.has(l.slot))) {
+        skipped.push({ ...p, slot: null, skipReason: `Skipped: ${slotLabel(p.slot)} — that comes from the profiles folder on the server.` });
+      }
+      live = live.filter((l) => !folder.has(l.slot));
+      if (live.length === 0) throw new ProfileBatchError(skipped[skipped.length - 1]!.skipReason!);
+    }
+    const slots = live.map((p) => p.slot);
+    const others = active.filter((a) => !(slots as readonly (string | null)[]).includes(a.slot));
     const candidate: SetUpload[] = [
       ...others.flatMap((o) =>
         isProfileSlot(o.slot) && slotInScope(o.slot, deps.advanced) && o.flattened
