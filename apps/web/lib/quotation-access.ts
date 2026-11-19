@@ -50,10 +50,10 @@ export function quotationAccessMatches(
   return syntacticallyValid && storedValid && expiresAt.getTime() > now.getTime() && equal;
 }
 
-/** HTTPS-ness of the current request (see isSecureRequest): the cookie is
- * Secure and __Host- prefixed only on an HTTPS visit. */
-async function secureRequest(): Promise<boolean> {
-  return isSecureRequest(env.appOrigin, (await headers()).get("x-direct-visit"));
+/** HTTPS-ness of a request (see isSecureRequest): the cookie is Secure and
+ * __Host- prefixed only on an HTTPS visit. */
+function secureFor(requestHeaders: Headers): boolean {
+  return isSecureRequest(env.appOrigin, requestHeaders.get("x-direct-visit"));
 }
 
 function cookieName(number: string, secure: boolean): string {
@@ -72,16 +72,17 @@ function cookieOptions(expiresAt: Date, secure: boolean) {
   };
 }
 
-export async function setQuotationAccessCookie(
+export function setQuotationAccessCookie(
+  request: Request,
   response: NextResponse,
   number: string,
   token: string,
   expiresAt: Date,
-): Promise<void> {
-  const secure = await secureRequest();
+): void {
+  const secure = secureFor(request.headers);
   response.cookies.set(cookieName(number, secure), token, cookieOptions(expiresAt, secure));
 }
 
 export async function getQuotationAccessCookie(number: string): Promise<string> {
-  return (await cookies()).get(cookieName(number, await secureRequest()))?.value ?? "";
+  return (await cookies()).get(cookieName(number, secureFor(await headers())))?.value ?? "";
 }
