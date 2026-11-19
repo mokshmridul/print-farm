@@ -151,6 +151,7 @@ stage_apply() {
     return
   fi
   write_env
+  move_data_to_dir
 
   head_line "Restarting"
   # Migrations run inside the container before web and worker start; a
@@ -244,10 +245,10 @@ move_to_single_image() {
   wait_healthy 300 || die "The site didn't come back after the restore."
 
   say "  Copying uploads and PDFs…"
-  local data_vol old_vol
-  data_vol=$(docker volume ls -q --filter label=com.docker.compose.project=print --filter label=com.docker.compose.volume=data | head -n1)
-  [ -n "$data_vol" ] || die "The new data volume was not created."
-  local -a mounts=(-v "$data_vol:/data")
+  local data_at old_vol
+  data_at=$(data_mount)
+  [ -n "$data_at" ] || die "The new container's data location was not created."
+  local -a mounts=(-v "$data_at")
   for old_vol in uploads pdfs; do
     local v
     v=$(docker volume ls -q --filter label=com.docker.compose.project=print --filter "label=com.docker.compose.volume=$old_vol" | head -n1)

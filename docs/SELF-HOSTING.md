@@ -310,7 +310,7 @@ go forward. If the older version misbehaves after a rollback, `update.sh`
 prints the command to restore the backup it took just before updating.
 
 Your settings are never touched by an update. They live in `.env` and the
-data volume, not in the code.
+data folder, not in the code.
 
 ### Moving from the old layout
 
@@ -387,7 +387,7 @@ file…** on the same card:
 - Passwords and API keys are never in the file, so re-enter the Shiprocket
   password and the email key or password; the restore says which.
 - Quotations, uploads and showcase photos aren't in this file. They're in the
-  database and the data volume. See [MAINTENANCE.md](MAINTENANCE.md) for backing
+  database and the data folder. See [MAINTENANCE.md](MAINTENANCE.md) for backing
   those up.
 
 ## Unattended install
@@ -431,7 +431,8 @@ curl -fsSL https://raw.githubusercontent.com/zappymussel380/print.rish.pw/main/i
 | `PS_CONFIRM_RESEND` + `PS_RESEND_KEY`, `PS_MAIL_TO`, `PS_CONTACT_FROM_EMAIL` | Contact-form email |
 | `PS_CONFIRM_SHIPROCKET` + `PS_SHIPROCKET_EMAIL`, `PS_SHIPROCKET_PASSWORD`, `PS_PINCODE` | Shiprocket |
 | `PS_CONFIRM_TELEGRAM` + `PS_TELEGRAM_TOKEN`, `PS_TELEGRAM_CHAT` | Telegram alerts |
-| `PS_EXISTING_DATA` | Only asked when the server still has the data volume of an earlier install: `keep` (default) or `delete` (also needs `PS_CONFIRM_DELETE_TEXT=DELETE`) |
+| `PS_DATA_DIR` | Where to keep the data (absolute path). Default: `<install folder>/data`, or, when the server still has an earlier install's `print_data` volume, that volume |
+| `PS_EXISTING_DATA` | Only asked when the server still has the data of an earlier install: `keep` (default) or `delete` (also needs `PS_CONFIRM_DELETE_TEXT=DELETE`) |
 
 ## Where things live
 
@@ -440,7 +441,15 @@ curl -fsSL https://raw.githubusercontent.com/zappymussel380/print.rish.pw/main/i
 | `.env` | Web address, admin password hash, API keys and printer choice. Private (`chmod 600`); back it up. |
 | `.selfhost/` | Update state. |
 | `backups/` | Database backups taken before each update. |
-| Docker volume `print_data` | Everything else: database, Redis, uploads, quotation PDFs, the generated database/session secrets (`secrets/`) and printer profiles. It stays when the install folder is deleted. |
+| `data/` | Everything else: database, Redis, uploads, quotation PDFs, the generated database/session secrets (`secrets/`) and printer profiles. Root-only parts stay root-only (`secrets/`, `postgres/`). Deleting the install folder deletes it too, so back it up with the rest. Installs from before this kept it in the Docker volume `print_data` instead (see below). |
+
+The data folder is `PRINT_DATA_DIR` in `.env`. To keep it somewhere else (a
+bigger disk, a backed-up mount), or to move an older install out of the
+`print_data` volume, set it to an absolute path and run `sudo ./update.sh
+--rebuild`: the container is stopped, the data is copied into the (empty)
+folder once, and the site starts from there. The volume is left as it was;
+`docker volume rm print_data` once you've checked. It can't be the install
+folder itself or a folder above it.
 
 Useful commands, run from the install folder:
 

@@ -583,6 +583,16 @@ configure_env() {
   [ "$branch" = HEAD ] || CFG[SELFHOST_BRANCH]=$branch
   [ -n "${PS_IMAGE_REPO:-}" ] && CFG[PRINT_IMAGE_REPO]=$PS_IMAGE_REPO
   apply_env_defaults || true
+  # Where the data lives. A new install keeps it beside the code, in
+  # <install folder>/data (git and the image build both ignore it). An install
+  # that already has its data in the Docker volume keeps using that volume
+  # unless PS_DATA_DIR asks to move it; update.sh then copies it over.
+  if [ -n "${PS_DATA_DIR:-}" ]; then
+    valid_data_dir "$PS_DATA_DIR" || die "PS_DATA_DIR must be an absolute path like $ROOT_DIR/data, not the install folder or above it."
+    CFG[PRINT_DATA_DIR]=$PS_DATA_DIR
+  elif [ -z "${CFG[PRINT_DATA_DIR]:-}" ] && [ -z "$(named_data_volume)" ]; then
+    CFG[PRINT_DATA_DIR]=$ROOT_DIR/data
+  fi
   CFG[APP_ORIGIN]=$(site_url)
   CFG[PROXY_BIND]=${ANS[PROXY_BIND]}
   CFG[PROXY_PORT]=${ANS[PROXY_PORT]}
@@ -671,18 +681,23 @@ set_admin_password() {
   ok "Admin password set"
 }
 
-# Everything durable (database, uploads, generated secrets) lives in one Docker
-# volume, which outlives the install folder. Picking up one left by an earlier
-# install just works — its secrets are inside it — but say so, and offer a
-# clean start.
+# Everything durable (database, uploads, generated secrets) lives in one place:
+# PRINT_DATA_DIR, or the Docker volume of earlier installs. Both outlive the
+# containers. Picking up data left by an earlier install just works — its
+# secrets are inside it — but say so, and offer a clean start.
 valid_existing_data() { [[ "$1" =~ ^(1|2|3|keep|delete|quit)$ ]]; }
 reconcile_data_volume() {
-  local vol created typed
-  vol=$(docker volume ls -q --filter label=com.docker.compose.project=print \
-    --filter label=com.docker.compose.volume=data 2>/dev/null | head -n1 || true)
-  [ -n "$vol" ] || return 0
+  local vol="" dir=${CFG[PRINT_DATA_DIR]:-} created="" typed
   [ -z "$(dc ps -aq "$SERVICE" 2>/dev/null)" ] || return 0
-  created=$(docker volume inspect -f '{{.CreatedAt}}' "$vol" 2>/dev/null || true)
+  if [ -n "$dir" ]; then
+    # A volume left beside an empty directory is moved in by start_stack.
+    dir_has_files "$dir" || return 0
+    created=$(stat -c %y "$dir" 2>/dev/null || true)
+  else
+    vol=$(named_data_volume)
+    [ -n "$vol" ] || return 0
+    created=$(docker volume inspect -f '{{.CreatedAt}}' "$vol" 2>/dev/null || true)
+  fi
   created=${created:0:16}
   head_line "Data from an earlier install"
   warn "This server still has the data of an earlier install${created:+ (created ${created/T/ })}."
@@ -696,13 +711,19 @@ reconcile_data_volume() {
       typed="${PS_CONFIRM_DELETE_TEXT:-}"
       unattended || read -r -p "Type DELETE to confirm: " typed </dev/tty
       [ "$typed" = "DELETE" ] || die "Nothing was deleted. Run this again to choose."
-      docker volume rm "$vol" >/dev/null || die "Could not delete $vol."
+      if [ -n "$dir" ]; then
+        valid_data_dir "$dir" || die "Refusing to empty $dir: it isn't a data folder this installer would use."
+        find "$dir" -mindepth 1 -delete || die "Could not empty $dir."
+      else
+        docker volume rm "$vol" >/dev/null || die "Could not delete $vol."
+      fi
       ok "Deleted the earlier install's data" ;;
     *) die "Nothing was changed. Run this again to choose." ;;
   esac
 }
 
 start_stack() {
+  move_data_to_dir
   head_line "Starting"
   dc up -d --remove-orphans || die "Starting failed. See: cd $ROOT_DIR && docker compose logs --tail 80"
   # The first boot creates the database and the printer's profiles.
@@ -818,13 +839,17 @@ uninstall() {
   confirm "Stop and remove the site's containers?" N UNINSTALL || die "Nothing was changed."
   dc down --remove-orphans
   ok "Containers removed (your data is still there)"
-  warn "The database, uploaded models and quotation PDFs are kept in a Docker volume."
+  warn "The database, uploaded models and quotation PDFs are kept in $(data_location)."
   local deleted=0
   if confirm "Delete ALL of that data permanently?" N DELETE_DATA; then
     local typed="${PS_CONFIRM_DELETE_TEXT:-}"
     unattended || read -r -p "Type DELETE to confirm: " typed </dev/tty
     if [ "$typed" = "DELETE" ]; then
       dc down -v --remove-orphans
+      if [ -n "${CFG[PRINT_DATA_DIR]:-}" ] && [ -d "${CFG[PRINT_DATA_DIR]}" ]; then
+        valid_data_dir "${CFG[PRINT_DATA_DIR]}" || die "Refusing to delete ${CFG[PRINT_DATA_DIR]}: it isn't a data folder this installer would use."
+        rm -rf -- "${CFG[PRINT_DATA_DIR]}"
+      fi
       ok "Data deleted"
       deleted=1
     else
@@ -835,6 +860,7 @@ uninstall() {
     say "  The code is still in $ROOT_DIR — delete that folder to remove everything."
   else
     say "  The code is still in $ROOT_DIR, and its .env holds your settings and admin login:"
+    [ -n "${CFG[PRINT_DATA_DIR]:-}" ] && say "  (the data is in ${CFG[PRINT_DATA_DIR]} — deleting that folder deletes it too)"
     say "  keep it, and bring the site back any time with: sudo $ROOT_DIR/install.sh"
     say "  To remove everything, uninstall again and delete the data, then delete the folder."
   fi
