@@ -162,7 +162,10 @@ From the old multi-container stack, or any PostgreSQL holding this schema:
    empty, migrated database, and wait for healthy.
 3. `print-farm restore < old.dump` as above.
 4. Copy the old uploads and PDFs into `/data/uploads` and `/data/pdfs`; `init`
-   fixes their ownership on the next start (`docker compose restart`).
+   fixes their ownership on the next start (`docker compose restart`). Only
+   **after** the restore: the worker's cleanup deletes any upload or PDF the
+   database doesn't know, and it runs whenever the container starts, so files
+   copied in beside an empty database are gone within seconds.
 5. Pin the old `SESSION_SECRET` in `.env` so sealed admin settings stay readable.
 
 Self-hosted installs do all of this by themselves on their first `update.sh`
@@ -173,8 +176,9 @@ to the single image (see [SELF-HOSTING.md](SELF-HOSTING.md#moving-from-the-old-l
 A PostgreSQL data directory belongs to one major version, and the container
 refuses to start on a data directory from another one. When a new image brings
 a new major version: take `print-farm backup` on the old image, move
-`/data/postgres` aside (or start with a new volume and copy `uploads/`, `pdfs/`
-and `secrets/` across), start the new image, then `print-farm restore`.
+`/data/postgres` aside, start the new image, then `print-farm restore`. Starting
+on a new volume instead: copy `secrets/` across before the first start, and
+`uploads/` and `pdfs/` only after the restore (see step 4 above for why).
 
 ## Upgrading OrcaSlicer or profiles
 

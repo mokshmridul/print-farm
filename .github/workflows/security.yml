@@ -122,10 +122,21 @@ jobs:
             echo "nginx renderer accepted an unsupported real-IP header" >&2
             exit 1
           fi
+          if DIRECT_ACCESS=yes TRUSTED_PROXY_CIDR=192.0.2.10 "$lib/render-nginx.sh" docker/proxy/nginx.conf /tmp/site.conf >/dev/null 2>&1; then
+            echo "nginx renderer accepted an invalid DIRECT_ACCESS" >&2
+            exit 1
+          fi
+          # The 403 gate is there exactly when a forwarder is set without DIRECT_ACCESS.
+          TRUSTED_PROXY_CIDR=192.0.2.10 "$lib/render-nginx.sh" docker/proxy/nginx.conf /tmp/site.conf
+          grep -q 'return 403' /tmp/site.conf
+          DIRECT_ACCESS=1 TRUSTED_PROXY_CIDR=192.0.2.10 "$lib/render-nginx.sh" docker/proxy/nginx.conf /tmp/site.conf
+          ! grep -q 'return 403' /tmp/site.conf
+          grep -q 'set_real_ip_from 192.0.2.10;' /tmp/site.conf
+          grep -qx '  0 1;' /tmp/site.conf
 
           # Both trust modes render a configuration nginx accepts.
-          for cidr in "" 192.0.2.10/32; do
-            TRUSTED_PROXY_CIDR="$cidr" "$lib/render-nginx.sh" docker/proxy/nginx.conf /tmp/site.conf
+          for mode in ":0" "192.0.2.10/32:0" "192.0.2.10:1"; do
+            TRUSTED_PROXY_CIDR="${mode%:*}" DIRECT_ACCESS="${mode##*:}" "$lib/render-nginx.sh" docker/proxy/nginx.conf /tmp/site.conf
             chmod a+r /tmp/site.conf
             docker run --rm -v /tmp/site.conf:/etc/nginx/conf.d/default.conf:ro \
               nginx:alpine@sha256:54f2a904c251d5a34adf545a72d32515a15e08418dae0266e23be2e18c66fefa nginx -t

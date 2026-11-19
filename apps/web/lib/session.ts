@@ -1,10 +1,11 @@
 import { SignJWT, jwtVerify } from "jose";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import {
   ADMIN_AUDIENCE,
   QUOTE_AUDIENCE,
   TOKEN_ISSUER,
   adminCookieName as sharedAdminCookieName,
+  isSecureRequest,
   quoteCookieName as sharedQuoteCookieName,
 } from "@print/shared";
 import { env } from "./env";
@@ -22,27 +23,27 @@ const ADMIN_TTL_SECONDS = 12 * 3600;
 
 const secretKey = () => new TextEncoder().encode(env.sessionSecret);
 
-// Mark cookies Secure only when the app is actually served over HTTPS (derived
-// from APP_ORIGIN's scheme). This keeps sessions working when the app is reached
-// over plain HTTP — e.g. a LAN IP for testing — while staying Secure in
-// production behind the TLS-terminating proxy (APP_ORIGIN=https://…).
-function secureCookies(): boolean {
-  return env.appOrigin.startsWith("https://");
+// Mark cookies Secure only when this request came over HTTPS: APP_ORIGIN is
+// https and nginx didn't mark it a direct LAN visit (see isSecureRequest). The
+// same shop then works through its HTTPS tunnel and at a LAN address over
+// plain HTTP, each with its own cookie names, so neither shadows the other.
+async function secureCookies(): Promise<boolean> {
+  return isSecureRequest(env.appOrigin, (await headers()).get("x-direct-visit"));
 }
 
-function quoteCookieName(): string {
-  return sharedQuoteCookieName(secureCookies());
+async function quoteCookieName(): Promise<string> {
+  return sharedQuoteCookieName(await secureCookies());
 }
 
-function adminCookieName(): string {
-  return sharedAdminCookieName(secureCookies());
+async function adminCookieName(): Promise<string> {
+  return sharedAdminCookieName(await secureCookies());
 }
 
-function cookieBase() {
+async function cookieBase() {
   return {
     httpOnly: true,
     sameSite: "strict" as const,
-    secure: secureCookies(),
+    secure: await secureCookies(),
     path: "/",
     priority: "high" as const,
   };
@@ -82,7 +83,7 @@ async function verify<T>(token: string | undefined, audience: string): Promise<T
 
 export async function getQuoteSessionId(): Promise<string | null> {
   const store = await cookies();
-  const payload = await verify<{ sid?: string }>(store.get(quoteCookieName())?.value, QUOTE_AUDIENCE);
+  const payload = await verify<{ sid?: string }>(store.get(await quoteCookieName())?.value, QUOTE_AUDIENCE);
   return payload?.sid ?? null;
 }
 
@@ -94,7 +95,7 @@ export async function getOrCreateQuoteSessionId(): Promise<string> {
   const sid = crypto.randomUUID();
   const token = await sign({ sid }, QUOTE_TTL_SECONDS, QUOTE_AUDIENCE);
   const store = await cookies();
-  store.set(quoteCookieName(), token, { ...cookieBase(), maxAge: QUOTE_TTL_SECONDS });
+  store.set(await quoteCookieName(), token, { ...(await cookieBase()), maxAge: QUOTE_TTL_SECONDS });
   return sid;
 }
 
@@ -104,19 +105,19 @@ export async function getOrCreateQuoteSessionId(): Promise<string> {
 
 export async function isAdmin(): Promise<boolean> {
   const store = await cookies();
-  const payload = await verify<{ role?: string }>(store.get(adminCookieName())?.value, ADMIN_AUDIENCE);
+  const payload = await verify<{ role?: string }>(store.get(await adminCookieName())?.value, ADMIN_AUDIENCE);
   return payload?.role === "admin";
 }
 
 export async function createAdminSession(): Promise<void> {
   const token = await sign({ role: "admin" }, ADMIN_TTL_SECONDS, ADMIN_AUDIENCE);
   const store = await cookies();
-  store.set(adminCookieName(), token, { ...cookieBase(), maxAge: ADMIN_TTL_SECONDS });
+  store.set(await adminCookieName(), token, { ...(await cookieBase()), maxAge: ADMIN_TTL_SECONDS });
 }
 
 export async function destroyAdminSession(): Promise<void> {
   const store = await cookies();
-  store.delete(adminCookieName());
+  store.delete(await adminCookieName());
 }
 
 /** For edge-proxy use (no next/headers cookies() there). */

@@ -232,8 +232,18 @@ move_to_single_image() {
   # The old edge/backend networks; anything still attached is not ours to remove.
   docker network ls -q --filter label=com.docker.compose.project=print | xargs -r docker network rm >/dev/null 2>&1 || true
 
+  # Order matters. The worker's cleanup sweep deletes any upload or PDF the
+  # database doesn't know, and it runs as soon as the container starts. So the
+  # database goes in first, into a container that still has no files, and the
+  # files are copied only once every row that names them is back.
+  head_line "Starting"
+  dc up -d --remove-orphans || die "Starting failed. See: cd $ROOT_DIR && docker compose logs --tail 80"
+  wait_healthy 600 || die "The new container didn't come up. The old data is untouched; see docs/SELF-HOSTING.md."
+  say "  Restoring the database…"
+  dc exec -T "$SERVICE" print-farm restore < "$backup" || die "Restoring the database failed. The old data is untouched; see docs/SELF-HOSTING.md."
+  wait_healthy 300 || die "The site didn't come back after the restore."
+
   say "  Copying uploads and PDFs…"
-  dc create --no-recreate >/dev/null || die "Could not create the new container. See: cd $ROOT_DIR && docker compose config"
   local data_vol old_vol
   data_vol=$(docker volume ls -q --filter label=com.docker.compose.project=print --filter label=com.docker.compose.volume=data | head -n1)
   [ -n "$data_vol" ] || die "The new data volume was not created."
@@ -248,14 +258,10 @@ move_to_single_image() {
     for d in uploads pdfs; do
       mkdir -p /data/$d
       [ -d /old/$d ] && cp -a /old/$d/. /data/$d/
-    done' || die "Copying the files failed. The old data is untouched; see docs/SELF-HOSTING.md."
-
-  head_line "Starting"
-  dc up -d --remove-orphans || die "Starting failed. See: cd $ROOT_DIR && docker compose logs --tail 80"
-  wait_healthy 600 || die "The new container didn't come up. The old data is untouched; see docs/SELF-HOSTING.md."
-  say "  Restoring the database…"
-  dc exec -T "$SERVICE" print-farm restore < "$backup" || die "Restoring the database failed. The old data is untouched; see docs/SELF-HOSTING.md."
-  wait_healthy 300 || die "The site didn't come back after the restore."
+    done
+    # What arrived, for the log below: every regular file under each.
+    for d in uploads pdfs; do printf "%s=%s\n" $d "$(find /data/$d -type f | wc -l)"; done' \
+    | sed 's/^/    /' || die "Copying the files failed. The old data is untouched; see docs/SELF-HOSTING.md."
 
   ok "Moved to the single container ($(short))"
   say "  The old volumes are still there, in case anything is missing. Once you're happy:"

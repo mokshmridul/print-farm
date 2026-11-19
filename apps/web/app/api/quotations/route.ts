@@ -549,7 +549,7 @@ async function postQuotation(request: NextRequest) {
   );
   response.headers.set("Cache-Control", "no-store");
   response.headers.set("Referrer-Policy", "no-referrer");
-  setQuotationAccessCookie(response, created.number, access.token, access.expiresAt);
+  await setQuotationAccessCookie(response, created.number, access.token, access.expiresAt);
   return response;
 }
 
