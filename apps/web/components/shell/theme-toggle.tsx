@@ -3,7 +3,7 @@
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 
-const STORAGE_KEY = "rish-theme";
+const STORAGE_KEY = "print-farm-theme";
 
 type ThemePreference = "system" | "light" | "dark";
 type EffectiveTheme = "light" | "dark";

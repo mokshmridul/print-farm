@@ -7,8 +7,8 @@ const ctx: FaqContext = {
     { id: "PETG", name: "PETG" },
   ],
   colourCount: 12,
-  printer: { name: "Bambu Lab A1", bedMm: [256, 256, 256], multiMaterial: false },
-  city: "Guwahati",
+  printer: { name: "Prusa MK4", bedMm: [256, 256, 256], multiMaterial: false },
+  city: "Springfield",
   leadTime: { printHoursPerDay: 8, bufferDays: 2 },
   courierQuotes: true,
   retention: { uploadHours: 48, fileDays: 30, quotationDays: 90 },
@@ -38,10 +38,10 @@ describe("buildFaq", () => {
   it("answers from the shop's own settings", () => {
     expect(answer(ctx, "materials")).toContain("Right now: PLA and PETG.");
     expect(answer(ctx, "colours")).toContain("12 colours across PLA and PETG");
-    expect(answer(ctx, "max-size")).toContain("256 × 256 × 256 mm — the full build volume of the Bambu Lab A1");
-    expect(answer(ctx, "accuracy")).toContain("same Bambu Lab A1 profile");
+    expect(answer(ctx, "max-size")).toContain("256 × 256 × 256 mm — the full build volume of the Prusa MK4");
+    expect(answer(ctx, "accuracy")).toContain("same Prusa MK4 profile");
     expect(answer(ctx, "turnaround")).toContain("about 8 printing hours a day, plus 2 days");
-    expect(answer(ctx, "turnaround")).toContain("Pickup in Guwahati");
+    expect(answer(ctx, "turnaround")).toContain("Pickup in Springfield");
     expect(answer(ctx, "shipping")).toContain("live estimate");
     expect(answer(ctx, "retention")).toContain("within 48 hours");
     expect(answer(ctx, "durability")).toContain("PLA handles static indoor loads");

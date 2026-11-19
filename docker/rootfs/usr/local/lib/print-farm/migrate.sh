@@ -18,6 +18,26 @@ run_as_storage() {
   ( exec_with_env env s6-setuidgid "$STORAGE_USER" "$@" )
 }
 
+# ── Backup before an update ───────────────────────────────────────────────────
+# A new image may migrate the database. Before it does, dump the database as
+# it was, so `print-farm restore` can always go back. The five newest are kept.
+version=$(head -n1 /etc/print-farm/version 2>/dev/null || echo unknown)
+previous=$(cat "$DATA_DIR/.image-version" 2>/dev/null || true)
+if [ -n "$previous" ] && [ "$previous" != "$version" ]; then
+  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  file="$BACKUP_DIR/before-update-$stamp.pgdump"
+  log "New image ($previous → $version): backing up the database to $file"
+  if PGHOST=$PG_HOST PGPORT=$PG_PORT PGDATABASE=$DB_NAME PGUSER=$OWNER_ROLE PGPASSWORD=$(secret postgres-owner-password) \
+      pg_dump --format=custom --no-owner --no-privileges > "$file.tmp"; then
+    mv "$file.tmp" "$file"
+    chmod 0600 "$file"
+    find "$BACKUP_DIR" -maxdepth 1 -name 'before-update-*.pgdump' | sort -r | tail -n +6 | xargs -r rm -f
+  else
+    rm -f "$file.tmp"
+    die "The backup before the update failed, so nothing was migrated. The previous image still works with this data."
+  fi
+fi
+
 log "Applying database migrations…"
 # Prisma 7 takes the connection URL from prisma.config.mjs, resolved from the
 # working directory: /opt/migrate is where config, schema and node_modules meet.
@@ -38,4 +58,37 @@ run_as_storage \
 
 owner_superuser NOSUPERUSER
 trap - EXIT
+printf '%s' "$version" > "$DATA_DIR/.image-version"
+
+# ── Admin password ────────────────────────────────────────────────────────────
+# The owner's lives in the database (AppSetting "adminPassword"). An install
+# from before kept it in a file: move it in once.
+sql() { psql_super -d "$DB_NAME" -tA "$@"; }
+claimed=$(sql -c "SELECT count(*) FROM \"AppSetting\" WHERE key = 'adminPassword'")
+if [ "$claimed" = 0 ] && [ -s "$SECRETS_DIR/admin-password-hash" ]; then
+  sql -v hash="$(<"$SECRETS_DIR/admin-password-hash")" <<'SQL'
+INSERT INTO "AppSetting" (key, value, "updatedAt") VALUES ('adminPassword', json_build_object('hash', :'hash'), now())
+ON CONFLICT (key) DO NOTHING;
+SQL
+  rm -f "$SECRETS_DIR/admin-password-hash"
+  claimed=1
+  log "Moved the admin password into the database"
+fi
+
+# Not set anywhere yet: whoever opens the shop first creates it, but only with
+# this one-time code, shown here (docker logs) and nowhere else.
+if [ "$claimed" = 0 ] && [ -z "$(admin_password_hash)" ]; then
+  if [ ! -s "$SECRETS_DIR/setup-code" ]; then
+    code=$(openssl rand -hex 4 | tr a-f A-F)
+    printf '%s-%s' "${code:0:4}" "${code:4:4}" > "$SECRETS_DIR/setup-code"
+    chmod 0600 "$SECRETS_DIR/setup-code"
+  fi
+  where=$(conf APP_ORIGIN "http://<this computer>:7654")
+  log "──────────────────────────────────────────────────────────────"
+  log " Welcome! Open $where/admin to set up the shop."
+  log " First-run setup code: $(<"$SECRETS_DIR/setup-code")"
+  log "──────────────────────────────────────────────────────────────"
+else
+  rm -f "$SECRETS_DIR/setup-code"
+fi
 log "Database ready"

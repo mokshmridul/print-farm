@@ -57,18 +57,20 @@ function otherMaterial(n: number): MaterialSpec {
 export const CATALOG: Catalog = {
   currency: "INR",
   setupFeePaise: 150_00,
+  // The shop's one printer. Its name, nozzle and build volume are always the
+  // configured printer's (apps/web/lib/pricing-settings.ts); only its power
+  // draw is a rate the admin sets.
   printers: {
-    "bbl-a1": {
-      name: "Bambu Lab A1",
+    shop: {
+      name: "3D printer",
       nozzleMm: 0.4,
-      bedMm: [256, 256, 256],
+      bedMm: [250, 250, 250],
       kwhPerHour: 0.09,
     },
   },
-  defaultPrinterId: "bbl-a1",
-  // Densities match filament_density in each tier's Numakers slicer profile
-  // (apps/worker/profiles/filament.*.json). Informational only: the billed grams
-  // come from the slicer, which scales them by density × flow ratio.
+  defaultPrinterId: "shop",
+  // Informational only: the billed grams come from the slicer, which uses the
+  // density in the printer's own filament preset.
   materials: {
     PLA: {
       name: "PLA",

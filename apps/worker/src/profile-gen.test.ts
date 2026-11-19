@@ -1,14 +1,15 @@
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { MATERIAL_IDS, ORCA_GENERIC_FILAMENTS } from "@print/shared";
+import { ORCA_GENERIC_FILAMENTS } from "@print/shared";
 import {
   ProfileIndex,
   bedOf,
   conditionMatches,
   generateProfiles,
   listPrinters,
+  main,
   plateFor,
 } from "./profile-gen";
 
@@ -97,17 +98,11 @@ describe("profile-gen", () => {
     expect(printers).toEqual([{ vendor: "Xyz", machine: MACHINE, model: "Xyz One", bedMm: [200, 210, 180] }]);
   });
 
-  it("generates a complete, flattened, CLI-safe set", () => {
+  it("generates a complete, flattened, CLI-safe set — with no filament presets", () => {
     const { spec, files } = generateProfiles(new ProfileIndex(root), MACHINE, false);
-    expect(Object.keys(files).sort()).toEqual(
-      [
-        "machine.json",
-        "process.0.12.json",
-        "process.0.16.json",
-        "process.0.20.json",
-        ...MATERIAL_IDS.map((m) => `filament.${m.toLowerCase().replace(/_/g, "-")}.json`),
-      ].sort(),
-    );
+    // No built-in filament presets: each material waits for the owner's own.
+    expect(Object.keys(files).sort()).toEqual(["machine.json", "process.0.12.json", "process.0.16.json", "process.0.20.json"]);
+    expect(spec).not.toHaveProperty("filamentPresets");
     for (const [name, profile] of Object.entries(files)) {
       expect(profile, name).not.toHaveProperty("inherits");
       expect(profile, name).not.toHaveProperty("filament_notes");
@@ -121,14 +116,7 @@ describe("profile-gen", () => {
     expect(files["process.0.20.json"]!.name).toContain("Standard");
     expect(files["process.0.16.json"]).toMatchObject({ layer_height: "0.16" });
     expect(String(files["process.0.16.json"]!.name)).toContain("derived");
-    // The vendor's own PLA beats the library; the library covers the rest.
-    expect(spec.filamentPresets?.PLA).toBe("Generic PLA @Xyz");
-    expect(spec.filamentPresets?.PLA_AESTHETIC).toBe("Generic PLA Silk @System");
-    expect(spec.filamentPresets?.PETG).toBe("Generic PETG @System");
-    expect(spec.filamentPresets?.PETG_PREMIUM).toBe("Generic PETG-CF @System");
-    expect(files["filament.petg.json"]!.filament_density).toEqual(["1.24"]);
-    // ASA has no textured-plate temperature here, so it prints on the hot plate.
-    expect(spec.plates.ASA).toBe("High Temp Plate");
+    // Each material's plate comes from its own preset once uploaded.
     expect(spec.plates.PLA).toBe("Textured PEI Plate");
     expect(spec).toMatchObject({ id: "xyz-one-0-4-nozzle", name: "Xyz One", bedMm: [200, 210, 180], multiMaterial: false, generated: true });
   });
@@ -152,26 +140,17 @@ describe("profile-gen", () => {
     expect(plateFor({ textured_plate_temp: ["0"], hot_plate_temp: ["0"], cool_plate_temp: ["35"] })).toBe("Cool Plate");
   });
 
-  it("builds the A1 set from the committed profiles, not the shop's PROFILES_DIR", async () => {
-    // The installer runs `generate` in a worker container whose PROFILES_DIR is
-    // the shop's (still empty) set; copying from there shipped no profiles.
-    const empty = mkdtempSync(join(tmpdir(), "shop-profiles-"));
-    const out = mkdtempSync(join(tmpdir(), "a1-out-"));
-    vi.stubEnv("PROFILES_DIR", empty);
-    vi.resetModules();
-    const { main } = await import("./profile-gen");
-    const { COMMITTED_PROFILES_DIR } = await import("./config");
+  it("marks a generic stand-in as a placeholder, and nothing else", async () => {
+    expect(generateProfiles(new ProfileIndex(root), MACHINE, false).spec).not.toHaveProperty("placeholder");
+    expect(generateProfiles(new ProfileIndex(root), MACHINE, false, undefined, true).spec.placeholder).toBe(true);
+    const out = mkdtempSync(join(tmpdir(), "placeholder-out-"));
     const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
     try {
-      await main(["generate", "Bambu Lab A1 0.4 nozzle", out]);
+      await main(["generate", MACHINE, out, "--placeholder", root]);
     } finally {
       stdout.mockRestore();
-      vi.unstubAllEnvs();
     }
-    const committed = readdirSync(COMMITTED_PROFILES_DIR).filter((f) => f.endsWith(".json") && f !== "printer.json");
-    expect(committed).toContain("machine.bbl-a1-04.json");
-    expect(readdirSync(out).sort()).toEqual([...committed, "printer.json"].sort());
-    rmSync(empty, { recursive: true, force: true });
+    expect(JSON.parse(readFileSync(join(out, "printer.json"), "utf8"))).toMatchObject({ machine: MACHINE, placeholder: true });
     rmSync(out, { recursive: true, force: true });
   });
 });

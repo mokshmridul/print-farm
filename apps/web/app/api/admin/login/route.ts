@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import { NextResponse, type NextRequest } from "next/server";
 import { guardMutation, jsonError, readJsonBody } from "@/lib/api-util";
-import { env } from "@/lib/env";
+import { adminPasswordHash } from "@/lib/admin-auth";
 import {
   RATE_LIMITS,
   releaseRateLimitReservation,
@@ -32,6 +32,9 @@ export async function POST(request: NextRequest) {
     return jsonError(422, "MISSING_PASSWORD", "Enter the admin password");
   }
 
+  const hash = await adminPasswordHash();
+  if (!hash) return jsonError(409, "SETUP_REQUIRED", "This shop has no admin password yet — create one with the setup code.");
+
   // Per-IP fairness depends on correct proxy attribution. This constant-key
   // bucket independently caps guesses against the one administrator account,
   // even when an attacker rotates valid-looking addresses. Reserve before the
@@ -60,7 +63,7 @@ export async function POST(request: NextRequest) {
   // across replicas so a distributed source cannot run many hashes in parallel.
   const ok = await withRedisLock(
     "admin-password-verify",
-    () => bcrypt.compare(password, env.adminPasswordHash).catch(() => false),
+    () => bcrypt.compare(password, hash).catch(() => false),
     { leaseMs: 5_000, waitMs: 1_000 },
   );
   if (ok === null) {

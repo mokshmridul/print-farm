@@ -24,7 +24,13 @@ vi.mock("@print/db", () => ({
     sliceResult: { findUnique: mocks.findSlice, findMany: vi.fn(async () => []) },
     quotation: { update: mocks.updateQuotation },
     // No live presets for the shop's own materials: the printer as installed.
-    slicerProfileUpload: { findMany: vi.fn(async () => []) },
+    slicerProfileUpload: {
+      findMany: vi.fn(async () => {
+        // Every material has the owner's live filament preset (none are built in).
+        const { FILAMENT_SLOTS } = await import("@print/shared");
+        return FILAMENT_SLOTS.map((slot) => ({ id: `live-${slot}`, slot, meta: { presetName: `Shop ${slot}` } }));
+      }),
+    },
     $transaction: mocks.transaction,
   },
 }));
@@ -109,7 +115,7 @@ beforeEach(() => {
         name: "Alert Test",
         email: "customer@example.com",
         phone: "+919876543210",
-        city: "Guwahati",
+        city: "Springfield",
         notes: "",
       },
       items: [

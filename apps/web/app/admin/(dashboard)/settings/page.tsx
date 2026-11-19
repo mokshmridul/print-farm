@@ -3,11 +3,13 @@ import { AdminPageHeader } from "@/components/admin/admin-page-header";
 import { BackupEditor } from "@/components/admin/backup-editor";
 import { MailEditor } from "@/components/admin/mail-editor";
 import { RetentionEditor } from "@/components/admin/retention-editor";
+import { ServerEditor } from "@/components/admin/server-editor";
 import { ShippingEditor } from "@/components/admin/shipping-editor";
 import { TaxEditor } from "@/components/admin/tax-editor";
 import { requireAdminPage } from "@/lib/admin-page";
 import { getMailConfig, toMailAdminView } from "@/lib/mail-settings";
 import { getRetention } from "@/lib/retention-settings";
+import { serverSettingsView } from "@/lib/server-settings";
 import { getShippingConfig, toAdminView } from "@/lib/shipping-settings";
 import { getTax } from "@/lib/tax-settings";
 
@@ -28,8 +30,9 @@ export default async function SettingsPage() {
     <>
       <AdminPageHeader
         title="Settings"
-        lede="Courier estimates on the quote page, where contact-form messages go, GST on quotations, how long uploads and old quotations are kept, and a backup of all your settings."
+        lede="The shop's web address, reverse proxy and printer, courier estimates on the quote page, where contact-form messages go, GST on quotations, how long uploads and old quotations are kept, and a backup of all your settings."
       />
+      <ServerEditor initial={serverSettingsView()} />
       <ShippingEditor initial={toAdminView(shipping)} />
       <MailEditor initial={toMailAdminView(mail)} />
       <TaxEditor initial={tax} />

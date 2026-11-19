@@ -7,14 +7,14 @@ import {
   slotInScope,
   startingPreset,
 } from "./custom-materials";
-import { customMaterialProblem, defaultAvailability, effectiveAvailability, toPublicCatalog } from "./catalog-availability";
+import { materialProblem, defaultAvailability, effectiveAvailability, toPublicCatalog } from "./catalog-availability";
 import { normalizeAvailability } from "./catalog-availability-schema";
 import { materialName } from "./catalog";
 import { filamentLine } from "./costs";
 import { slotMismatch } from "./orca-profile";
-import { CUSTOM_MATERIAL_IDS, STOCK_MATERIAL_IDS, isCustomMaterial, type CustomMaterialId } from "./quote-types";
+import { CUSTOM_MATERIAL_IDS, STOCK_MATERIAL_IDS, isCustomMaterial, type MaterialId } from "./quote-types";
 
-const none = new Set<CustomMaterialId>();
+const none = new Set<MaterialId>();
 
 describe("the shop's own materials", () => {
   it("are four slots, apart from the stock materials", () => {
@@ -59,27 +59,31 @@ describe("offering one of the shop's own materials", () => {
   });
 
   it("needs a name and a live OrcaSlicer profile", () => {
-    const ready = new Set<CustomMaterialId>(["OTHER_1", "OTHER_2"]);
+    const ready = new Set<MaterialId>(["OTHER_1", "OTHER_2"]);
     const live = effectiveAvailability(stored, ready);
     expect(live.materials.OTHER_1).toBe(true); // named + ready
     expect(live.materials.OTHER_2).toBe(false); // ready, no name
     expect(live.materials.OTHER_3).toBe(false); // named, no profile
     expect(live.materials.OTHER_4).toBe(false); // never switched on
-    expect(live.materials.PLA).toBe(true); // stock materials untouched
+    // No built-in presets: a stock material needs the owner's preset too.
+    expect(live.materials.PLA).toBe(false);
+    expect(effectiveAvailability(stored, new Set<MaterialId>(["PLA"])).materials.PLA).toBe(true);
     expect(stored.materials.OTHER_3).toBe(true); // the stored choice is kept for when it's ready
   });
 
   it("says what is missing", () => {
-    expect(customMaterialProblem(stored, "OTHER_2", none)).toBe("Other material 2 needs a name first.");
-    expect(customMaterialProblem(stored, "OTHER_3", none)).toMatch(/^PC needs an OrcaSlicer profile first/);
-    expect(customMaterialProblem(stored, "OTHER_1", new Set(["OTHER_1"]))).toBeNull();
+    expect(materialProblem(stored, "OTHER_2", none)).toBe("Other material 2 needs a name first.");
+    expect(materialProblem(stored, "OTHER_3", none)).toMatch(/^PC needs an OrcaSlicer profile first/);
+    expect(materialProblem(stored, "OTHER_1", new Set(["OTHER_1"]))).toBeNull();
+    expect(materialProblem(stored, "PLA", none)).toMatch(/^PLA needs your OrcaSlicer filament preset first/);
+    expect(materialProblem(stored, "PLA", new Set(["PLA"]))).toBeNull();
   });
 
   it("shows the owner each slot's setup, and customers only names", () => {
     const admin = toPublicCatalog(stored, new Set(["OTHER_1"]));
     const one = admin.materials.find((m) => m.id === "OTHER_1")!;
     expect(one).toMatchObject({ name: "ABS-CF", setup: { named: true, ready: true, problem: null } });
-    expect(admin.materials.find((m) => m.id === "PLA")).not.toHaveProperty("setup");
+    expect(admin.materials.find((m) => m.id === "PLA")).toMatchObject({ setup: { named: true, ready: false } });
     const pub = toPublicCatalog(effectiveAvailability(stored, new Set(["OTHER_1"])));
     expect(pub.materials.find((m) => m.id === "OTHER_1")).toMatchObject({ name: "ABS-CF", enabled: true });
     expect(pub.materials.find((m) => m.id === "OTHER_3")).toMatchObject({ name: "PC", enabled: false });
@@ -88,9 +92,9 @@ describe("offering one of the shop's own materials", () => {
 });
 
 describe("OrcaSlicer profiles for the shop's own materials", () => {
-  it("open only their filament slots unless the install is in advanced mode", () => {
-    expect(slotInScope("filament:OTHER_1", false)).toBe(true);
-    for (const slot of ["filament:PLA", "machine", "process:200"]) expect(slotInScope(slot, false), slot).toBe(false);
+  it("open every filament slot on any install, the printer's only in advanced mode", () => {
+    for (const slot of ["filament:OTHER_1", "filament:PLA"]) expect(slotInScope(slot, false), slot).toBe(true);
+    for (const slot of ["machine", "process:200"]) expect(slotInScope(slot, false), slot).toBe(false);
     for (const slot of ["filament:PLA", "machine", "process:200", "filament:OTHER_4"]) expect(slotInScope(slot, true), slot).toBe(true);
     expect(slotInScope("filament:NYLON", true)).toBe(false);
     expect(slotInScope("anything", true)).toBe(false);

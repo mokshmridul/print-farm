@@ -273,7 +273,7 @@ const checkout = await jsonResponse(
         name: "API Flow Test",
         email: "api-flow@example.invalid",
         phone: "+919876543210",
-        city: "Guwahati",
+        city: "Springfield",
         notes: "Disposable CI fixture",
       },
     }),

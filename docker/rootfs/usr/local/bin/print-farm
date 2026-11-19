@@ -4,7 +4,8 @@
 #   docker exec <container> print-farm <command>
 #
 #   health                     exit 0 when web, database, Redis and the worker are up
-#   admin-password             set a new admin password (prompted, or read from stdin)
+#   admin-password             set a new admin password (prompted, or read from stdin);
+#                              also how to get back in if it's forgotten
 #   seed-settings [--if-missing] < settings.json
 #                              write shop settings (siteProfile, pricing,
 #                              catalogAvailability, faq) straight into the database
@@ -17,7 +18,7 @@ PF_COMPONENT=print-farm
 # shellcheck source=../lib/print-farm/common.sh
 . /usr/local/lib/print-farm/common.sh
 
-usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; }
 
 [ "$(id -u)" -eq 0 ] || die "Run as root: docker exec <container> print-farm $*"
 
@@ -41,18 +42,21 @@ cmd_health() {
 }
 
 cmd_admin_password() {
-  [ -z "$(cenv ADMIN_PASSWORD_HASH)" ] || die "ADMIN_PASSWORD_HASH is set in the container's environment, which takes precedence.
+  [ -z "$(admin_password_hash)" ] || die "ADMIN_PASSWORD or ADMIN_PASSWORD_HASH is set in the container's environment, which takes precedence.
   Change or remove it there (and recreate the container) instead."
   local hash
   # hash-password.mjs prompts on a terminal and reads stdin otherwise; it
   # refuses anything under 12 or over 72 bytes.
   hash=$(node /opt/tools/hash-password.mjs | tail -n1) || die "The password was not changed."
   [[ "$hash" =~ ^\$2[aby]\$1[2-9]\$[./A-Za-z0-9]{53}$ ]] || die "Hashing failed; the password was not changed."
-  printf '%s' "$hash" > "$SECRETS_DIR/admin-password-hash.tmp"
-  mv "$SECRETS_DIR/admin-password-hash.tmp" "$SECRETS_DIR/admin-password-hash"
-  rm -f "$SECRETS_DIR/initial-admin-password"
-  svc_restart web
-  log "Admin password changed; the web is restarting."
+  # The owner's password lives in the database, where the web reads it at
+  # every login: no restart needed.
+  psql_super -d "$DB_NAME" -v hash="$hash" <<'SQL'
+INSERT INTO "AppSetting" (key, value, "updatedAt") VALUES ('adminPassword', json_build_object('hash', :'hash'), now())
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "updatedAt" = now();
+SQL
+  rm -f "$SECRETS_DIR/setup-code"
+  log "Admin password changed."
 }
 
 cmd_seed_settings() {

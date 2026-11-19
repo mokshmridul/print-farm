@@ -22,7 +22,7 @@ import {
 } from "@print/shared";
 import { printerSpec } from "./config.js";
 
-const CANONICAL_ARCHIVE_HEADER = "print.rish.pw canonical archive geometry";
+const CANONICAL_ARCHIVE_HEADER = "print-farm canonical archive geometry";
 
 /** The machine we quote for. Loose 3MF build items are packed onto plates this
  *  size, so a part the source slicer left off its plate still gets sliced. */

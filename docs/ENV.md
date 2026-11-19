@@ -1,20 +1,22 @@
 # Environment variables
 
-Copy `.env.example` to `.env`, fill in values, and run `chmod 0600 .env`.
-Production secrets have no usable defaults and are validated before startup.
-Passwords embedded in URLs must be percent-encoded.
+None of these is needed: the shop is set up in the browser, and the server
+settings (web address, reverse proxy, printer) are kept in
+`/data/config/settings.json`. A variable set here (in a `.env` beside the
+compose file, `chmod 0600`) overrides the browser setting of the same meaning,
+which is then shown locked.
 
 ## Core
 
 | Variable | Required | Default | Notes |
 | --- | --- | --- | --- |
-| `APP_ORIGIN` | production | `http://localhost:8080` | Exact public origin used for CSRF, cookies, CSP/HSTS, and generated links. HTTPS unless it is localhost or a private-network address; no path/query. With an https origin, a direct LAN visit served through `DIRECT_ACCESS=1` gets non-Secure cookies and no HSTS/upgrade-insecure-requests; every other request is treated as HTTPS. |
+| `APP_ORIGIN` | no | the web address in Settings → Server, else `http://localhost:7654` | Exact public origin used for CSRF, cookies, CSP/HSTS, and generated links. HTTPS unless it is localhost or a private-network address; no path/query. With an https origin, a direct LAN visit served through `DIRECT_ACCESS=1` gets non-Secure cookies and no HSTS/upgrade-insecure-requests; every other request is treated as HTTPS. |
 | `PRINT_IMAGE` | compose | `ghcr.io/mokshmridul/print-farm:latest` | Image to run. Every commit on main is published as `:sha-<7 hex>` too. |
-| `PROXY_BIND` / `PROXY_PORT` | compose | `127.0.0.1` / `8080` | Host address and port the container's :8080 is published on. Use only the private address reached by the public proxy; never `0.0.0.0` on a public server. |
-| `TRUSTED_PROXY_CIDR` | behind a proxy | empty | The one transport source allowed to assert the client IP/scheme: one IPv4 host (no prefix or `/32`) or unbracketed IPv6 host (no prefix or `/128`); startup rejects subnets, lists, hostnames, and invalid/config syntax. Empty: nothing is trusted and every peer is served as itself. |
+| `PRINT_PORT` | compose | `7654` | What the container's :7654 is published on, e.g. `127.0.0.1:7654` for loopback only (do that on a server reachable from the internet). |
+| `TRUSTED_PROXY_CIDR` | no | Settings → Server | The one transport source allowed to assert the client IP/scheme: one IPv4 host (no prefix or `/32`) or unbracketed IPv6 host (no prefix or `/128`), or `host` for a proxy on the same computer (the container's gateway); startup rejects subnets, lists, hostnames, and invalid/config syntax. Empty: nothing is trusted and every peer is served as itself. |
 | `REAL_IP_HEADER` | no | `X-Real-IP` | Where that forwarder puts the client address: `X-Real-IP` or `CF-Connecting-IP`. |
 | `DIRECT_ACCESS` | no | `0` | `1`: with `TRUSTED_PROXY_CIDR` set, other peers are served too, each identified by its own address and scheme, instead of getting 403. For LAN access at `http://<PROXY_BIND>:<PROXY_PORT>` beside a tunnel; those visits get non-Secure cookies under their own names. |
-| `PRINT_DATA_DIR` | compose | empty | Host directory mounted at `/data` (absolute path). Empty: the named volume `data` (`print_data`). The self-host installer sets `<install folder>/data`; `update.sh` copies an existing volume into it once when it's newly set. |
+| `PRINT_DATA_DIR` | compose | `./data` | Host folder mounted at `/data`: everything durable. |
 | `PRINT_PROFILES_DIR` | compose | `./profiles` | Host folder mounted read-only at `/profiles`: the owner's OrcaSlicer exports in `printer/`, `process/`, `filament/` (SELF-HOSTING.md, "The profiles folder"), synced into the live presets when the container starts. Any preset there turns advanced profiles on. |
 | `PRINT_MEMORY` / `PRINT_TMP_SIZE` | compose | `12g` / `3g` | Memory ceiling for the whole container, and the in-memory `/tmp` the slicer stages models in. |
 
@@ -39,8 +41,8 @@ passwords and least-privilege grants before web and worker run.
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `SESSION_SECRET` | no | Generated in `/data/secrets/session-secret` when unset. Pin it (at least 32 random bytes) only to keep an existing install's value. Signs purpose-separated quote, admin, and shipping tokens. |
-| `ADMIN_PASSWORD` | no | Hashed on first boot only, never stored in plain text. |
-| `ADMIN_PASSWORD_HASH` | no | A pinned bcrypt hash (cost 12+); takes precedence over the hash kept in the volume. Without either, a password is generated and printed once in the first boot's log. Change the kept one with `print-farm admin-password`. |
+| `ADMIN_PASSWORD` | no | Overrides the owner's password; hashed at every start, never stored. |
+| `ADMIN_PASSWORD_HASH` | no | A pinned bcrypt hash (cost 12+); overrides the owner's password. Without either, the first visitor creates one with the one-time setup code from the container log; it is kept in the database and changed with `print-farm admin-password`. |
 
 Docker Compose interpolates `$` in `.env`: put a pinned bcrypt hash in single
 quotes (`ADMIN_PASSWORD_HASH='$2a$12$…'`), or double every `$` to `$$`.
@@ -49,9 +51,9 @@ quotes (`ADMIN_PASSWORD_HASH='$2a$12$…'`), or double every `$` to `$$`.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `PRINTER_MACHINE` | unset | Unset: the committed, hand-tuned Bambu Lab A1 profiles. Otherwise an exact OrcaSlicer machine preset (`docker/selfhost/printers.tsv`); `init` generates its profiles into `/data/printer` and regenerates them when the choice or OrcaSlicer changes. |
+| `PRINTER_MACHINE` | Settings → Server | No default printer. Unset (here and in the browser): advanced mode on a generic placeholder, and no quotes until your own OrcaSlicer printer preset is live. Otherwise an exact OrcaSlicer machine preset (`/etc/print-farm/printers.tsv` in the image); `init` generates its profiles into `/data/printer` and regenerates them when the choice or OrcaSlicer changes. |
 | `PRINTER_MULTI_MATERIAL` | `0` | `1` for an AMS/MMU/tool changer (automatic multicolour). |
-| `PRINTER_ADVANCED` (`ADVANCED_PROFILES` in the container) | `0` | `1`: the owner uploads OrcaSlicer presets in admin → Slicer profiles. |
+| `ADVANCED_PROFILES` | `0` | `1`: the owner uploads OrcaSlicer presets in admin → Slicer profiles. |
 | `PRINTER_DISPLAY_NAME` | | The printer's name in customer copy. |
 
 ## Business and third-party services
@@ -62,11 +64,11 @@ quotes (`ADMIN_PASSWORD_HASH='$2a$12$…'`), or double every `$` to `$$`.
 | `CONTACT_EMAIL` | empty | Unused. The public contact email, phone and address are set in admin → Site. |
 | `GOOGLE_MAPS_EMBED_URL` | empty | Optional exact Google Maps HTTPS embed URL; enables Google in CSP `frame-src`. |
 | `RESEND_API_KEY` / `MAIL_TO` | none | Contact-form delivery through Resend, used until admin → Settings → Email is saved (which also offers SMTP and replaces all three). Without either, the contact page shows WhatsApp and the shop's details instead of a form. Messages contain the submitted name, email, subject, and message. |
-| `CONTACT_FROM` | `print.rish.pw <contact@rish.pw>` | Verified Resend sender (until admin → Settings → Email is saved). |
+| `CONTACT_FROM` | unset (mail off) | Verified Resend sender (until admin → Settings → Email is saved). |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | empty | Both enable order notifications containing customer/order details and static, PII-free operator alerts. These remain web-only secrets. |
 | `TELEGRAM_MESSAGE_THREAD_ID` | empty | Optional positive Telegram forum topic ID. |
 | `SHIPROCKET_EMAIL` / `SHIPROCKET_PASSWORD` | none | Optional API-user credentials for shipping estimates; do not use the dashboard login. Used until admin → Shipping is saved, which then replaces all three. Without either, the quote page has no shipping estimator. |
-| `SHIPROCKET_PICKUP_PINCODE` | `781001` | Workshop origin pincode (until admin → Shipping is saved). |
+| `SHIPROCKET_PICKUP_PINCODE` | unset (shipping off) | Workshop origin pincode (until admin → Shipping is saved). |
 
 Treat third-party configuration as a privacy decision, not only a technical
 one. Review vendor retention/access terms before enabling it.
@@ -99,7 +101,7 @@ one. Review vendor retention/access terms before enabling it.
 | `ORCA_VERSION` | `2.5.1` | Must agree with the pinned image/cache pipeline version. |
 | `STEP_CONVERT_BIN` | `/usr/bin/occt-draw` | OpenCASCADE DRAW harness used to tessellate STEP uploads inside the parse sandbox (baked into the worker image). |
 | `STEP_CONVERT_TIMEOUT_SECONDS` | `120` | Per-file STEP→STL conversion timeout; hard maximum 600 seconds. |
-| `PROFILES_DIR` | worker profiles | Flattened, committed A1 profiles. |
+| `PROFILES_DIR` | `/data/printer` | The printer's generated profile set. |
 | `SLICE_WORK_DIR` | `/tmp/slice-jobs` | Private per-job scratch root. |
 | `SLICER_UID` / `SLICER_GID` | `1002` / `3000` | Base identity for untrusted per-job slicer processes. |
 | `STORAGE_UID` / `STORAGE_GID` | `1001` / `1001` | Durable storage owner. |

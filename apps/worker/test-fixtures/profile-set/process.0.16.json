@@ -1,0 +1,12 @@
+{
+  "type": "process",
+  "name": "0.16mm Test",
+  "print_settings_id": "0.16mm Test",
+  "instantiation": "true",
+  "layer_height": "0.16",
+  "compatible_printers": [
+    "Test Printer 0.4 nozzle"
+  ],
+  "sparse_infill_density": "15%",
+  "wall_loops": "2"
+}

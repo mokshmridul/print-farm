@@ -8,6 +8,9 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["test-integration/**/*.test.ts"],
+    // A configured printer (the hand-written test set): without one the shop
+    // takes no quotes and every customer route answers SHOP_NOT_READY.
+    env: { PRINTER_SPEC_FILE: `${root}/../worker/test-fixtures/profile-set/printer.json` },
     // Every test uses the same disposable database and Redis namespace. Keeping
     // files serial makes cleanup deterministic as the suite grows in Task 0.3.
     fileParallelism: false,

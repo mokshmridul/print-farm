@@ -7,7 +7,7 @@ import {
   sliceJobId,
   sliceSettingsSchema,
 } from "@print/shared";
-import { getPrinterProfile } from "@/lib/printer";
+import { getPrinterProfile, SHOP_NOT_READY_MESSAGE, shopReady } from "@/lib/printer";
 import { guardMutation, jsonError, readJsonBody } from "@/lib/api-util";
 import { getCatalogAvailability } from "@/lib/catalog-availability";
 import { normalizeModelConfigLocks } from "@/lib/model-config-locks";
@@ -29,6 +29,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   const guard = await guardMutation(request, "slice", RATE_LIMITS.slice);
   if (guard) return guard;
+  if (!(await shopReady())) return jsonError(503, "SHOP_NOT_READY", SHOP_NOT_READY_MESSAGE);
 
   const sessionId = await getQuoteSessionId();
   if (!sessionId) return jsonError(401, "NO_SESSION", "No quote session");

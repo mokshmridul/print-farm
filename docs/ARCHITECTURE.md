@@ -19,7 +19,7 @@ container. Under the s6-overlay supervisor it runs:
   OrcaSlicer, render thumbnails, and perform the daily retention sweep. The
   orchestrator runs as root so it can drop every Orca and parse job to its own
   credential-free uid.
-- **nginx** — the only listener reachable from outside the container (:8080,
+- **nginx** — the only listener reachable from outside the container (:7654,
   plain HTTP): per-route body limits, client-IP trust, log hygiene.
 
 Each process gets its environment built from scratch by its run script — an
@@ -36,9 +36,9 @@ They share three workspace packages:
   returns a triangle soup, bounding box and volume (no three.js in Node).
 
 ```
-   VPS host nginx (print.rish.pw, TLS)
+   VPS host nginx (print.example.com, TLS)
                 │ Tailscale
-                ▼ :8080
+                ▼ :7654
  ┌──────────────────────── print-farm container ─────────────────────────┐
  │  nginx ──▶ web (Next, :3000) ──▶ PostgreSQL (:5432)                    │
  │                 │                  ▲                                   │
@@ -46,13 +46,13 @@ They share three workspace packages:
  │               Redis (:6379) ◀── worker ──▶ OrcaSlicer / parse jobs     │
  │                 ingest/slice jobs     (own uid each, cleared env)     │
  │                                                                        │
- │  /data (PRINT_DATA_DIR, or the data volume): postgres/ redis/ uploads/ │
+ │  /data (PRINT_DATA_DIR, default ./data): postgres/ redis/ uploads/     │
  │  pdfs/ secrets/ printer/                                               │
  └────────────────────────────────────────────────────────────────────────┘
 ```
 
 Only nginx listens outside the container. The VPS host nginx terminates TLS for
-`print.rish.pw` and proxies to it over Tailscale — see
+`print.example.com` and proxies to it over Tailscale — see
 [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Request flows
@@ -142,7 +142,7 @@ authoritatively at checkout — client totals are never trusted.
 ### Checkout
 `POST /api/quotations` rebuilds every line from DB slice results and reprices.
 In one transaction it atomically claims each model as single-use, allocates an
-`RSP-<year>-<seq>` number, and persists quotation/items/history. It then renders
+`<PREFIX>-<year>-<seq>` (e.g. `PS-2026-0001`) number, and persists quotation/items/history. It then renders
 a size-bounded PDF under a short Redis lease around the final free-space check
 and exclusive write. Per-IP limits and a global daily circuit breaker bound
 permanent-row/PDF/notification amplification.

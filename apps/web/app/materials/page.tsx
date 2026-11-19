@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { MATERIAL_GUIDE_ROWS, listJoin, materialsPageEntries } from "@print/shared";
+import { FilamentMatrix } from "@/components/materials/filament-matrix";
 import { PageIntro } from "@/components/shell/page-intro";
 import { getCatalogAvailability } from "@/lib/catalog-availability";
 import { getPricing } from "@/lib/pricing-settings";
@@ -45,6 +46,9 @@ export default async function MaterialsPage() {
         }
       />
 
+      <FilamentMatrix />
+
+      <h2 className="section-title mx-auto mt-16 max-w-4xl text-2xl">What we print with</h2>
       <div className="mx-auto mt-10 max-w-4xl md:hidden">
         <div className="border-y border-line">
           {MATERIAL_GUIDE_ROWS.map((row) => (

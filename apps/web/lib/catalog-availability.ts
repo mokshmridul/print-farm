@@ -1,8 +1,8 @@
 import { cache } from "react";
 import { Prisma, prisma } from "@print/db";
 import {
-  CUSTOM_FILAMENT_SLOTS,
   CUSTOM_MATERIAL_IDS,
+  FILAMENT_SLOTS,
   cleanCustomGuide,
   cleanCustomMaterialName,
   effectiveAvailability,
@@ -12,6 +12,7 @@ import {
   type AvailabilityInput,
   type CustomMaterialGuide,
   type CustomMaterialId,
+  type MaterialId,
   type ProfileSlot,
 } from "@print/shared";
 
@@ -31,24 +32,28 @@ export const getStoredCatalogAvailability = cache(async (): Promise<Availability
   }
 });
 
-/** The shop's own materials that have a live, test-sliced filament profile. */
-export const getReadyCustomMaterials = cache(async (): Promise<ReadonlySet<CustomMaterialId>> => {
+/** The materials that have a live, test-sliced filament preset of the owner's
+ *  — the only ones that can be sold (there are no built-in presets). */
+export const getReadyMaterials = cache(async (): Promise<ReadonlySet<MaterialId>> => {
   try {
     const rows = await prisma.slicerProfileUpload.findMany({
-      where: { status: "ACTIVE", slot: { in: [...CUSTOM_FILAMENT_SLOTS] } },
+      where: { status: "ACTIVE", slot: { in: [...FILAMENT_SLOTS] } },
       select: { slot: true },
     });
-    return new Set(rows.flatMap((r) => (r.slot ? [slotMaterial(r.slot as ProfileSlot) as CustomMaterialId] : [])));
+    return new Set(rows.flatMap((r) => {
+      const m = r.slot ? slotMaterial(r.slot as ProfileSlot) : null;
+      return m ? [m] : [];
+    }));
   } catch {
-    // Unknown means not ready: a custom material is never offered on a guess.
+    // Unknown means not ready: a material is never offered on a guess.
     return new Set();
   }
 });
 
-/** Current material/colour availability as customers get it: stored, with the
- *  shop's own materials off until they're named and have a live profile. */
+/** Current material/colour availability as customers get it: stored, with
+ *  every material off until it has a live preset (and the shop's own a name). */
 export const getCatalogAvailability = cache(async (): Promise<Availability> => {
-  const [stored, ready] = await Promise.all([getStoredCatalogAvailability(), getReadyCustomMaterials()]);
+  const [stored, ready] = await Promise.all([getStoredCatalogAvailability(), getReadyMaterials()]);
   return effectiveAvailability(stored, ready);
 });
 

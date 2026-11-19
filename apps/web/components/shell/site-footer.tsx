@@ -10,7 +10,7 @@ const footerLinks = [
   { href: "/contact", label: "Contact" },
 ];
 
-// A bare domain in the footer note ("A rish.pw project") becomes a link.
+// A bare domain in the footer note ("An example.com project") becomes a link.
 const DOMAIN = /\b([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})\b/i;
 
 function FooterNote({ note }: { note: string }) {
@@ -48,7 +48,7 @@ export function SiteFooter({ note, city, brandName }: { note: string; city: stri
         </nav>
         <p>
           <FooterNote note={note || brandName} />
-          {city ? ` · ${city}, India` : " · India"}
+          {city ? ` · ${city}, India` : null}
         </p>
       </div>
     </footer>

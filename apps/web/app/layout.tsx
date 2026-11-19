@@ -43,7 +43,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 // Applies explicit theme overrides before first paint. With no saved override,
 // CSS follows the browser's preferred color scheme.
-const themeInit = `(function(){try{var t=localStorage.getItem("rish-theme");var d=document.documentElement;if(t==="light"||t==="dark"){d.setAttribute("data-theme",t);}else{d.removeAttribute("data-theme");}}catch(e){}})();`;
+const themeInit = `(function(){try{var t=localStorage.getItem("print-farm-theme");var d=document.documentElement;if(t==="light"||t==="dark"){d.setAttribute("data-theme",t);}else{d.removeAttribute("data-theme");}}catch(e){}})();`;
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const nonce = (await headers()).get("x-nonce") ?? undefined;

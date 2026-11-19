@@ -1,4 +1,4 @@
-import { CUSTOM_MATERIAL_IDS, LAYER_HEIGHTS_UM, MATERIAL_IDS, isCustomMaterial, type CustomMaterialId } from "./quote-types";
+import { CUSTOM_MATERIAL_IDS, LAYER_HEIGHTS_UM, MATERIAL_IDS, type CustomMaterialId } from "./quote-types";
 
 /**
  * The shop's own materials (OTHER_1…OTHER_4): fixed slots an owner names and
@@ -28,13 +28,17 @@ export function customFilamentSlot(id: CustomMaterialId): `filament:${CustomMate
 
 export const CUSTOM_FILAMENT_SLOTS = CUSTOM_MATERIAL_IDS.map(customFilamentSlot);
 
-/** Which uploaded-preset slots apply on this install. Advanced mode (the owner's
- *  own printer and presets) uses every slot; any other install only the shop's
- *  own materials' filament slots — its printer and stock materials keep the
- *  profiles the installer generated. */
+/** Every material's filament slot. No material has a built-in preset: each is
+ *  sold only once the owner's own filament preset for it is live. */
+export const FILAMENT_SLOTS = MATERIAL_IDS.map((id) => `filament:${id}` as const);
+
+/** Which uploaded-preset slots apply on this install. Every filament slot does,
+ *  on any install; the printer and process slots only in advanced mode (the
+ *  owner's own printer) — otherwise they keep the profiles generated for the
+ *  printer picked from OrcaSlicer's list. */
 export function slotInScope(slot: string, advanced: boolean): boolean {
   const material = slot.startsWith("filament:") ? slot.slice("filament:".length) : null;
-  if (material !== null) return (MATERIAL_IDS as readonly string[]).includes(material) && (advanced || isCustomMaterial(material));
+  if (material !== null) return (MATERIAL_IDS as readonly string[]).includes(material);
   const real = slot === "machine" || LAYER_HEIGHTS_UM.some((um) => slot === `process:${um}`);
   return real && advanced;
 }

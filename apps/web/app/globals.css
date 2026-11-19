@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ---------------------------------------------------------------------------
- * Design tokens — ported from rish.pw (index.html).
+ * Design tokens.
  * With no data-theme override, the page follows the browser color scheme.
  * Explicit light/dark choices are persisted under "rish-theme".
  * ------------------------------------------------------------------------- */
@@ -119,7 +119,7 @@ html[data-theme="dark"] {
 }
 
 @layer components {
-  /* Uppercase eyebrow label — the recurring rish.pw section-kicker motif. */
+  /* Uppercase eyebrow label — the recurring section-kicker motif. */
   .eyebrow {
     font-size: 0.875rem;
     font-weight: 600;

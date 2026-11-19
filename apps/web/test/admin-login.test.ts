@@ -7,10 +7,11 @@ const mocks = vi.hoisted(() => ({
   withRedisLock: vi.fn(),
   compare: vi.fn(),
   createAdminSession: vi.fn(),
+  hash: vi.fn(async (): Promise<string | null> => "$2b$12$test"),
 }));
 
 vi.mock("bcryptjs", () => ({ default: { compare: mocks.compare } }));
-vi.mock("@/lib/env", () => ({ env: { adminPasswordHash: "$2b$12$test" } }));
+vi.mock("@/lib/admin-auth", () => ({ adminPasswordHash: mocks.hash }));
 vi.mock("@/lib/api-util", () => ({
   guardMutation: mocks.guardMutation,
   readJsonBody: async (request: Request) => ({ ok: true, value: await request.json() }),
@@ -93,6 +94,14 @@ describe("POST /api/admin/login", () => {
       "reservation",
     );
     expect(mocks.createAdminSession).toHaveBeenCalledOnce();
+  });
+
+  it("sends a shop with no admin password yet to the setup code", async () => {
+    mocks.hash.mockResolvedValueOnce(null);
+    const response = await POST(loginRequest());
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe("SETUP_REQUIRED");
+    expect(mocks.compare).not.toHaveBeenCalled();
   });
 
   it("refunds an attempt when the bcrypt lock is busy", async () => {

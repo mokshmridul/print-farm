@@ -20,10 +20,9 @@ vi.mock("@print/db", () => ({
 }));
 
 // config.ts reads its environment on import: slice into a scratch work root,
-// from the committed A1 set.
+// from the fixture printer's set (vitest.config.ts).
 const work = mkdtempSync(join(tmpdir(), "profile-test-work-"));
 vi.stubEnv("SLICE_WORK_DIR", work);
-vi.stubEnv("PROFILES_DIR", "");
 const { ProfileIndex } = await import("./profile-gen.js");
 const { cubeStl, planBatch, processProfileBatch, testSlicesFor } = await import("./profile-test.js");
 
@@ -147,8 +146,8 @@ describe("processProfileBatch", () => {
     await processProfileBatch(BATCH, { index: () => index, slice, advanced: true });
 
     expect(slice).toHaveBeenCalledTimes(1);
-    expect(seen!.files).toEqual(expect.arrayContaining(["machine.bbl-a1-04.json", "process.0.20.json", "printer.json"]));
-    expect(seen!.filament).toMatchObject({ name: "My PLA", filament_flow_ratio: ["0.95"], compatible_printers: ["Bambu Lab A1 0.4 nozzle"] });
+    expect(seen!.files).toEqual(expect.arrayContaining(["machine.json", "process.0.20.json", "printer.json"]));
+    expect(seen!.filament).toMatchObject({ name: "My PLA", filament_flow_ratio: ["0.95"], compatible_printers: ["Test Printer 0.4 nozzle"] });
     expect(seen!.filament).not.toHaveProperty("post_process");
     // The test set is gone, and the batch replaced what was live in one go.
     expect(readdirSync(join(work, "profile-sets"))).toEqual([]);
@@ -192,7 +191,7 @@ describe("processProfileBatch", () => {
         filament_type: ["PLA"],
         filament_density: ["1.30"],
         filament_flow_ratio: ["0.98"],
-        compatible_printers: ["Bambu Lab A1 0.4 nozzle"],
+        compatible_printers: ["Test Printer 0.4 nozzle"],
       });
       expect(mocks.update).toHaveBeenCalledWith({
         where: { id: "c" },
@@ -200,16 +199,22 @@ describe("processProfileBatch", () => {
       });
     });
 
-    it("refuses a preset for the printer or a stock material before slicing anything", async () => {
-      for (const slot of ["filament:PLA", "process:200"]) {
-        mocks.findMany.mockResolvedValueOnce([row("a", slot, slot === "filament:PLA" ? myPla : { name: "p", inherits: "0.20mm Standard @Generic" })]);
-        const slice = vi.fn();
-        await processProfileBatch(BATCH, { index: () => index, slice, advanced: false });
-        expect(slice, slot).not.toHaveBeenCalled();
-        expect(mocks.updateMany).toHaveBeenLastCalledWith(
-          expect.objectContaining({ data: expect.objectContaining({ status: "FAILED", error: expect.stringMatching(/Only your own materials/) }) }),
-        );
-      }
+    it("refuses a printer or process preset before slicing anything", async () => {
+      mocks.findMany.mockResolvedValueOnce([row("a", "process:200", { name: "p", inherits: "0.20mm Standard @Generic" })]);
+      const slice = vi.fn();
+      await processProfileBatch(BATCH, { index: () => index, slice, advanced: false });
+      expect(slice).not.toHaveBeenCalled();
+      expect(mocks.updateMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: "FAILED", error: expect.stringMatching(/Only filament presets/) }) }),
+      );
+    });
+
+    it("takes a stock material's filament preset too: none are built in", async () => {
+      mocks.findMany.mockResolvedValueOnce([row("a", "filament:PLA", myPla)]).mockResolvedValueOnce([]);
+      const slice = vi.fn(async () => ({ ok: true, filamentGrams: 3.1, slicerVersion: "2.5.1", rawMeta: {} }));
+      await processProfileBatch(BATCH, { index: () => index, slice, advanced: false });
+      expect(slice).toHaveBeenCalledTimes(1);
+      expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "a" }, data: expect.objectContaining({ status: "ACTIVE" }) }));
     });
 
     it("leaves presets from an earlier advanced-mode setup out of the test", async () => {
@@ -220,11 +225,49 @@ describe("processProfileBatch", () => {
         .mockResolvedValueOnce([{ id: "old", slot: "machine", meta: { presetName: "Leftover" }, flattened: klipper }]);
       let machine: Record<string, unknown> | null = null;
       const slice = vi.fn(async (_input, _settings, _workDir, _identity, _progress, set) => {
-        machine = JSON.parse(readFileSync(join(set.dir, "machine.bbl-a1-04.json"), "utf8"));
+        machine = JSON.parse(readFileSync(join(set.dir, "machine.json"), "utf8"));
         return { ok: true, filamentGrams: 3, slicerVersion: "2.4.1", rawMeta: {} };
       });
       await processProfileBatch(BATCH, { index: () => index, slice, advanced: false });
-      expect(machine).toMatchObject({ name: "Bambu Lab A1 0.4 nozzle" });
+      expect(machine).toMatchObject({ name: "Test Printer 0.4 nozzle" });
+    });
+  });
+
+  describe("a printer preset's test slice", () => {
+    const klipper = { name: "My Klipper", inherits: "Generic Klipper Printer 0.4 nozzle", printer_settings_id: "My Klipper" };
+    const filamentIn = (set: { dir: string }) => {
+      const name = readdirSync(set.dir).find((f) => f.startsWith("filament."));
+      return name ? { name, preset: JSON.parse(readFileSync(join(set.dir, name), "utf8")) as Record<string, unknown> } : null;
+    };
+
+    it("uses a test-only reference PLA when the owner has no filament live yet", async () => {
+      mocks.findMany.mockResolvedValueOnce([row("m", "machine", klipper)]).mockResolvedValueOnce([]);
+      let seen: ReturnType<typeof filamentIn> = null;
+      const slice = vi.fn(async (_i, settings, _w, _id, _p, set) => {
+        expect(settings).toMatchObject({ material: "PLA", layerHeightUm: 200 });
+        seen = filamentIn(set);
+        return { ok: true, filamentGrams: 3, slicerVersion: "2.5.1", rawMeta: {} };
+      });
+      await processProfileBatch(BATCH, { index: () => index, slice, advanced: true });
+      expect(seen).toMatchObject({ name: "filament.pla.json", preset: { name: "Reference PLA (test only)", filament_density: ["1.24"] } });
+      // Only the printer went live; the reference filament was never stored.
+      expect(mocks.update).toHaveBeenCalledTimes(1);
+      expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "m" } }));
+      expect(readdirSync(join(work, "profile-sets"))).toEqual([]);
+    });
+
+    it("uses one of the owner's live filaments when there is one", async () => {
+      const petg = index.flattenPreset("filament", { name: "Shop PETG", inherits: "Generic PLA @System", filament_type: ["PETG"] }, []);
+      mocks.findMany
+        .mockResolvedValueOnce([row("m", "machine", klipper)])
+        .mockResolvedValueOnce([{ id: "p", slot: "filament:PETG", meta: { presetName: "Shop PETG" }, flattened: petg }]);
+      const slice = vi.fn(async (_i, settings, _w, _id, _p, set) => {
+        expect(settings).toMatchObject({ material: "PETG" });
+        expect(filamentIn(set)).toMatchObject({ name: "filament.petg.json", preset: { name: "Shop PETG" } });
+        return { ok: true, filamentGrams: 3, slicerVersion: "2.5.1", rawMeta: {} };
+      });
+      await processProfileBatch(BATCH, { index: () => index, slice, advanced: true });
+      expect(slice).toHaveBeenCalledTimes(1);
     });
   });
 

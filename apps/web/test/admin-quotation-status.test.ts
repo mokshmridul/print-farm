@@ -38,7 +38,7 @@ const tx = {
 };
 
 function request(status: string, note = ""): NextRequest {
-  return new Request("https://print.rish.pw/api/admin/quotations/quote-id", {
+  return new Request("https://print.example.com/api/admin/quotations/quote-id", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status, note }),

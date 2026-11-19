@@ -11,6 +11,7 @@ import {
   colourShortName,
   formatPaise,
   groupColours,
+  isCustomMaterial,
   layerHeightLabel,
   newCustomColourId,
   swatchBackground,
@@ -247,7 +248,7 @@ export function CatalogEditor({
                     <input
                       type="checkbox"
                       checked={materialOn}
-                      // One of the shop's own materials can't go on sale before it has a profile.
+                      // No material can go on sale before it has a live filament preset.
                       disabled={Boolean(m.setup?.problem) && !materialOn}
                       onChange={(e) => {
                         // Read now: by the time the updater runs, React may have put
@@ -276,7 +277,8 @@ export function CatalogEditor({
               {m.setup?.problem ? (
                 <p className="mt-1 pl-8 text-xs text-faint">
                   {materialOn ? "Not on sale yet: " : ""}
-                  {m.setup.problem} See Your own materials below.
+                  {m.setup.problem}
+                  {isCustomMaterial(m.id) ? " See Your own materials below." : null}
                 </p>
               ) : m.setup?.ready && !materialOn ? (
                 <p className="mt-1 pl-8 text-xs text-faint">Ready to sell: tick it to put it on sale, then save.</p>

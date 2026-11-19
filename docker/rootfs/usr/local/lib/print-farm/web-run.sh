@@ -13,11 +13,10 @@ e=(
   NODE_ENV=production
   PORT=3000
   HOSTNAME=127.0.0.1
-  "APP_ORIGIN=$(cenv APP_ORIGIN http://localhost:8080)"
+  "APP_ORIGIN=$(conf APP_ORIGIN http://localhost:7654)"
   "DATABASE_URL=$(web_db_url)"
   "REDIS_URL=$(redis_url)"
   "SESSION_SECRET=$(session_secret)"
-  "ADMIN_PASSWORD_HASH=$(admin_password_hash)"
   "UPLOAD_DIR=$UPLOAD_DIR"
   "PDF_DIR=$PDF_DIR"
 )
@@ -26,8 +25,8 @@ for name in WHATSAPP_NUMBER CONTACT_EMAIL GOOGLE_MAPS_EMBED_URL RESEND_API_KEY M
     SHIPROCKET_EMAIL SHIPROCKET_PASSWORD; do
   pass_env e "$name"
 done
-pass_env e CONTACT_FROM "print.rish.pw <contact@rish.pw>"
-pass_env e SHIPROCKET_PICKUP_PINCODE 781001
+pass_env e CONTACT_FROM
+pass_env e SHIPROCKET_PICKUP_PINCODE
 pass_env e MAX_UPLOAD_MB 300
 pass_env e MAX_SESSION_UPLOAD_MB 900
 pass_env e UPLOAD_WINDOW_MB 900
@@ -41,8 +40,25 @@ pass_env e FILE_RETENTION_DAYS 30
 pass_env e QUOTATION_RETENTION_DAYS 90
 pass_env e LOG_LEVEL info
 e+=("ADVANCED_PROFILES=$(advanced_profiles)")
-# A generated printer set (init → printer-profiles.sh) names the printer and
-# its build volume; without one the web uses the Bambu Lab A1 defaults.
+# The admin password from the environment, if one is set there; otherwise the
+# web reads the owner's from the database, and until there is one it accepts
+# the first-run setup code (migrate.sh) to create it.
+hash=$(admin_password_hash)
+[ -n "$hash" ] && e+=("ADMIN_PASSWORD_HASH=$hash")
+[ -s "$SECRETS_DIR/setup-code" ] && e+=("SETUP_CODE=$(<"$SECRETS_DIR/setup-code")")
+unset hash
+# The owner's server settings: where the web saves them, the printers they may
+# pick from, and which ones the environment overrides (shown as locked).
+e+=("SERVER_SETTINGS_FILE=$SETTINGS_FILE" "PRINTERS_FILE=$PRINTERS_LIST")
+locked=""
+for name in APP_ORIGIN TRUSTED_PROXY_CIDR PRINTER_MACHINE; do
+  [ -n "$(cenv "$name")" ] && locked+="${locked:+,}$name"
+done
+e+=("SERVER_SETTINGS_LOCKED=$locked")
+# The web needs its address now and then for links (PDFs, messages), so it
+# gets it from the settings at start; a change restarts it (settings-run.sh).
+# The generated printer set (init → printer-profiles.sh) names the printer and
+# its build volume; without one no printer is set up and no quotes are taken.
 [ -f "$PRINTER_DIR/.stamp" ] && e+=("PRINTER_SPEC_FILE=$PRINTER_DIR/printer.json")
 
 cd /app

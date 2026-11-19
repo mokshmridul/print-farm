@@ -31,7 +31,7 @@ describe("csvCell", () => {
 
   it("leaves ordinary strings untouched", () => {
     expect(csvCell("Rishabh")).toBe("Rishabh");
-    expect(csvCell("Guwahati 781001")).toBe("Guwahati 781001");
+    expect(csvCell("Springfield 110001")).toBe("Springfield 110001");
     expect(csvCell("a - b")).toBe("a - b"); // dash not in first position
   });
 

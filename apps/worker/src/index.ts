@@ -1,4 +1,4 @@
-import { chmod, chown, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, chmod, chown, mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { Queue, Worker, type Job } from "bullmq";
 import IORedis from "ioredis";
@@ -10,6 +10,7 @@ import {
   SLICE_QUEUE,
   SLICE_PIPELINE_VERSION,
   UUID_RE,
+  printerReady,
   sliceArtifactKey,
   slicerProfileJobId,
   sliceSettingsSchema,
@@ -22,7 +23,7 @@ import {
   RETENTION_BOUNDS,
   type PurgeJobData,
 } from "@print/shared";
-import { config } from "./config.js";
+import { config, filamentProfile } from "./config.js";
 import { INGEST_WORKER_OPTIONS, processIngestJob, terminalCleanup } from "./ingest.js";
 import { renderThumbnailIsolated } from "./parse-runner.js";
 import { runSlice } from "./orca.js";
@@ -138,6 +139,18 @@ async function processJob(job: Job<SliceJobData>): Promise<void> {
   }
   // The owner's live presets in advanced mode, the installer's set otherwise.
   const profileSet = await activeProfileSet();
+  // No printer set up yet (or only the generic stand-in of own-presets mode):
+  // the web takes no quotes then, so a job here is stale or forged.
+  if (!printerReady(profileSet.spec)) {
+    throw new Error("No printer is set up yet: refusing to slice for a customer");
+  }
+  // No built-in filament presets: a material without the owner's live preset
+  // isn't on sale, so a job for one is stale or forged.
+  try {
+    await access(join(profileSet.dir, filamentProfile(settings.material)));
+  } catch {
+    throw new Error(`No filament preset for ${settings.material}: refusing to slice for a customer`);
+  }
   if (
     // The key names the printer — and in advanced mode the revision of the
     // owner's presets: a job keyed for other profiles than these must not be

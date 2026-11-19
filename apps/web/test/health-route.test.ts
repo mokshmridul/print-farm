@@ -42,7 +42,7 @@ describe("health route worker heartbeat observation", () => {
     const response = await getHealth();
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true, db: true, redis: true });
+    await expect(response.json()).resolves.toMatchObject({ ok: true, db: true, redis: true, boot: expect.any(String) });
     expect(mocks.observe).toHaveBeenCalledWith(true);
   });
 
@@ -52,7 +52,7 @@ describe("health route worker heartbeat observation", () => {
     const response = await getHealth();
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true, db: true, redis: true });
+    await expect(response.json()).resolves.toMatchObject({ ok: true, db: true, redis: true, boot: expect.any(String) });
     expect(mocks.observe).toHaveBeenCalledWith(false);
   });
 
@@ -63,7 +63,7 @@ describe("health route worker heartbeat observation", () => {
     const response = await getHealth();
 
     expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({ ok: false, db: true, redis: false });
+    await expect(response.json()).resolves.toMatchObject({ ok: false, db: true, redis: false });
     expect(mocks.observe).toHaveBeenCalledWith(false);
   });
 });

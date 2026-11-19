@@ -5,16 +5,16 @@ describe("Telegram order notification", () => {
   it("includes order summary and protected model download links", () => {
     const message = buildNewQuotationTelegramMessage({
       number: "Q-2026-0001",
-      appOrigin: "https://print.rish.pw",
+      appOrigin: "https://print.example.com",
       customer: {
         name: "Test Customer",
         email: "test@example.com",
         phone: "+919999999999",
-        city: "Guwahati",
+        city: "Springfield",
         notes: "Please print cleanly.",
       },
       shippingPaise: 12000,
-      shippingPincode: "781001",
+      shippingPincode: "110001",
       totalPaise: 45000,
       lines: [
         {
@@ -35,8 +35,8 @@ describe("Telegram order notification", () => {
 
     expect(message).toContain("New print order");
     expect(message).toContain("Quotation: Q-2026-0001");
-    expect(message).toContain("https://print.rish.pw/admin");
-    expect(message).toContain("https://print.rish.pw/api/models/model_1/file");
+    expect(message).toContain("https://print.example.com/admin");
+    expect(message).toContain("https://print.example.com/api/models/model_1/file");
     expect(message).toContain("PETG Black, 0.20mm, 15% infill, supports off");
     expect(message).not.toContain("Round off");
   });
@@ -44,8 +44,8 @@ describe("Telegram order notification", () => {
   it("says what rounding the total added, signed", () => {
     const base = {
       number: "Q-2026-0002",
-      appOrigin: "https://print.rish.pw",
-      customer: { name: "A", email: "a@example.com", phone: "9999999999", city: "Guwahati" },
+      appOrigin: "https://print.example.com",
+      customer: { name: "A", email: "a@example.com", phone: "9999999999", city: "Springfield" },
       shippingPaise: 0,
       shippingPincode: null,
       totalPaise: 45000,
@@ -72,12 +72,12 @@ describe("Telegram order notification", () => {
 
     const message = buildNewQuotationTelegramMessage({
       number: "Q-2026-0002",
-      appOrigin: "https://print.rish.pw",
+      appOrigin: "https://print.example.com",
       customer: {
         name: "Test Customer",
         email: "test@example.com",
         phone: "+919999999999",
-        city: "Guwahati",
+        city: "Springfield",
         notes: "x".repeat(1000),
       },
       shippingPaise: 0,

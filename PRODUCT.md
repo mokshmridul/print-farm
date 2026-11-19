@@ -6,7 +6,7 @@ product
 
 ## Users
 
-People requesting small-batch or one-off FDM prints in and around Guwahati. They arrive with a model file and need to understand printability, time, material use, and price without learning slicer software.
+People requesting small-batch or one-off FDM prints from a local print shop. They arrive with a model file and need to understand printability, time, material use, and price without learning slicer software.
 
 ## Product Purpose
 

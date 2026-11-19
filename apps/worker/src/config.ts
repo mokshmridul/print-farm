@@ -1,7 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { DEFAULT_PRINTER_SPEC, parsePrinterSpec, type MaterialId, type PrinterProfileSpec } from "@print/shared";
+import { UNCONFIGURED_PRINTER_SPEC, parsePrinterSpec, type MaterialId, type PrinterProfileSpec } from "@print/shared";
 
 function str(name: string, fallback: string): string {
   const v = process.env[name];
@@ -30,17 +29,14 @@ export function stubSlicerEnabled(
 
 const MAX_QUOTATION_RETENTION_DAYS = 90;
 
-/** The hand-tuned Bambu Lab A1 set committed with the worker. Distinct from
- *  `profilesDir` once a self-hosted shop points PROFILES_DIR at its generated
- *  set — and the installer's own profile-gen run sees that (still empty) dir. */
-export const COMMITTED_PROFILES_DIR = fileURLToPath(new URL("../profiles", import.meta.url));
-
 export const config = {
   redisUrl: str("REDIS_URL", "redis://localhost:6379"),
   /** OrcaSlicer AppRun entrypoint inside the worker image. */
   orcaBin: str("ORCA_BIN", "/opt/orca/AppRun"),
-  /** Committed, inheritance-flattened Bambu A1 profiles. */
-  profilesDir: str("PROFILES_DIR", COMMITTED_PROFILES_DIR),
+  /** The printer's generated profile set (printer-profiles.sh writes it to
+   *  /data/printer). Without one no printer is set up and nothing is sliced
+   *  for customers. */
+  profilesDir: str("PROFILES_DIR", "./data/printer"),
   /** Shared uploads volume — same path the web container mounts. */
   uploadDir: str("UPLOAD_DIR", "./data/uploads"),
   pdfDir: str("PDF_DIR", "./data/pdfs"),
@@ -113,9 +109,9 @@ export function processProfile(layerHeightUm: number): string {
   }
 }
 
-/** Slicer preset per material tier (scripts/overlay-numakers-profiles.py):
- *  Numakers' own for the PLA/PETG tiers, Orca's generic A1 preset for ABS/ASA/TPU
- *  and as the placeholder for the shop's own materials (OTHER_*).
+/** Slicer preset per material tier in a generated set (profile-gen.ts): the
+ *  printer's own OrcaSlicer preset for each tier, and a placeholder for the
+ *  shop's own materials (OTHER_*).
  *  A Record, not a fallback branch, so a new material can never silently slice
  *  with another tier's temperatures and density. */
 const FILAMENT_PROFILES: Record<MaterialId, string> = {
@@ -139,19 +135,16 @@ export function filamentProfile(material: MaterialId): string {
   return FILAMENT_PROFILES[material];
 }
 
-/** A generated set (profile-gen.ts) names its machine plainly; the committed A1
- *  set keeps its historical name. */
-export const MACHINE_PROFILE = existsSync(join(config.profilesDir, "machine.json"))
-  ? "machine.json"
-  : "machine.bbl-a1-04.json";
+/** The machine profile's file name in every set. */
+export const MACHINE_PROFILE = "machine.json";
 
-/** The printer this worker slices for: `printer.json` beside a generated set,
- *  the Bambu Lab A1 otherwise (the committed profiles carry none). */
+/** The printer this worker slices for: `printer.json` beside the generated
+ *  set. Missing: no printer is set up (a placeholder printerReady refuses). */
 export const printerSpec: PrinterProfileSpec = (() => {
   try {
     return parsePrinterSpec(JSON.parse(readFileSync(join(config.profilesDir, "printer.json"), "utf8")));
   } catch {
-    return DEFAULT_PRINTER_SPEC;
+    return UNCONFIGURED_PRINTER_SPEC;
   }
 })();
 
@@ -163,7 +156,7 @@ export interface ProfileSet {
   spec: PrinterProfileSpec;
 }
 
-/** The installer-generated (or committed A1) set, with no uploads applied —
+/** The generated set, with no uploads applied —
  *  what every slice uses unless advanced mode has live uploads. */
 export const BASE_PROFILE_SET: ProfileSet = {
   dir: config.profilesDir,

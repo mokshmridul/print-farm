@@ -14,6 +14,12 @@ import {
   integrationConnection,
 } from "./support/connections";
 
+// The shop's printer as the routes see it: the configured test printer
+// (vitest.integration.config.ts) plus the revision of the live presets CI
+// seeds. Every slice cache key names it.
+const { getPrinterProfile } = await import("@/lib/printer");
+const PRINTER_ID = (await getPrinterProfile()).id;
+
 const requestSession = vi.hoisted(() => ({
   id: "c316207c-a790-44ae-b769-5e97727f4b74",
 }));
@@ -67,7 +73,7 @@ describe("slice retry generation fence", () => {
       infillPct: 15,
       supports: "auto",
     };
-    const settingsKey = sliceArtifactKey("stl", settings);
+    const settingsKey = sliceArtifactKey("stl", settings, PRINTER_ID);
     const clientIp = "192.0.2.173";
 
     try {

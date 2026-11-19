@@ -1,8 +1,8 @@
 {
-  "name": "print-rish-pw",
+  "name": "print-farm",
   "version": "1.0.0",
   "private": true,
-  "description": "Instant 3D-printing quotation system for print.rish.pw",
+  "description": "Instant 3D-printing quotation system for self-hosted print shops",
   "license": "MIT",
   "engines": {
     "node": ">=24"

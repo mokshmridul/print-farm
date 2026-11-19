@@ -1,59 +1,52 @@
-# print-farm: one container, one data volume.
+# print-farm — a 3D-printing quote shop in one container.
 #
-#   cp .env.example .env   # set APP_ORIGIN at least
 #   docker compose up -d
 #
-# The image (docker/Dockerfile) runs the web app, the slicing worker,
-# PostgreSQL, Redis and nginx under one supervisor. Only nginx listens outside
-# the container, on :8080, in plain HTTP: put HTTPS in front of it (your
-# reverse proxy, Cloudflare Tunnel, ...). See docs/DEPLOYMENT.md.
+# Then open http://<this computer>:7654/admin. The first visit asks for the
+# one-time setup code from the log (`docker compose logs | grep "setup code"`),
+# creates the admin password and walks you through the printer, filaments and
+# shop details. Everything is kept in ./data; back that folder up.
 #
-# `docker compose pull` fetches the published image; `docker compose build`
-# builds the same image from this checkout instead.
+# Nothing below needs changing. Every setting lives in the browser (admin →
+# Settings) and in ./data/config/settings.json; an environment variable here
+# (or in a .env file beside this one) overrides it — see .env.example.
 #
-# Pinned so the Compose project (and its named volume) stays stable
-# regardless of the folder name the stack is launched from.
+# Update: `docker compose pull && docker compose up -d`. The database is
+# backed up to ./data/backups before a new version migrates it.
 name: print
 
 services:
   print-farm:
     image: ${PRINT_IMAGE:-ghcr.io/mokshmridul/print-farm:latest}
+    container_name: print-farm
     build:
       context: .
       dockerfile: docker/Dockerfile
     ports:
-      # Bound to loopback by default so the shop is never reachable from the
-      # host's public interfaces. Set PROXY_BIND to the address your reverse
-      # proxy reaches this host on (a Tailscale IP, a LAN IP) — never 0.0.0.0
-      # for a public server.
-      - "${PROXY_BIND:-127.0.0.1}:${PROXY_PORT:-8080}:8080"
+      # Plain HTTP. Put your reverse proxy in front for HTTPS, and tell the shop
+      # about it in admin → Settings → Server. On a server reachable from the
+      # internet, publish to loopback or your LAN address only, e.g.
+      # "127.0.0.1:7654:7654".
+      - "${PRINT_PORT:-7654}:7654"
+    volumes:
+      # Everything durable: database, uploads, PDFs, settings, secrets, backups.
+      - ${PRINT_DATA_DIR:-./data}:/data
+      # Optional: OrcaSlicer exports to slice with, picked up at startup —
+      # printer/, process/ and filament/ (docs/SELF-HOSTING.md). Read-only.
+      - ${PRINT_PROFILES_DIR:-./profiles}:/profiles:ro
     environment:
-      # The public address customers use (https://…). Plain http is accepted
-      # only for localhost and private-network addresses.
-      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
-      # One host that may assert the client address (your proxy as seen from
-      # inside the container). Empty: trust none, serve every peer. Set: every
-      # other peer gets 403, unless DIRECT_ACCESS=1 (then every other peer is
-      # served as itself, e.g. LAN devices beside a tunnel).
-      # REAL_IP_HEADER: X-Real-IP or CF-Connecting-IP.
+      # All optional; empty means "use the browser setting" (.env.example).
+      APP_ORIGIN: ${APP_ORIGIN:-}
       TRUSTED_PROXY_CIDR: ${TRUSTED_PROXY_CIDR:-}
-      REAL_IP_HEADER: ${REAL_IP_HEADER:-X-Real-IP}
-      DIRECT_ACCESS: ${DIRECT_ACCESS:-0}
-      # Admin login. Empty everywhere: a password is generated on first boot and
-      # printed once in `docker compose logs`. ADMIN_PASSWORD is hashed on first
-      # boot only; change it later with `docker compose exec print-farm print-farm admin-password`.
-      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      # Normally generated and kept in the volume. Pin it only when moving an
-      # existing install (settings sealed with the old one stay readable).
-      SESSION_SECRET: ${SESSION_SECRET:-}
-      # Printer: unset = the hand-tuned Bambu Lab A1 profiles. Otherwise an
-      # exact OrcaSlicer machine preset (docker/selfhost/printers.tsv).
+      REAL_IP_HEADER: ${REAL_IP_HEADER:-}
+      DIRECT_ACCESS: ${DIRECT_ACCESS:-}
       PRINTER_MACHINE: ${PRINTER_MACHINE:-}
-      PRINTER_MULTI_MATERIAL: ${PRINTER_MULTI_MATERIAL:-0}
-      ADVANCED_PROFILES: ${PRINTER_ADVANCED:-0}
+      PRINTER_MULTI_MATERIAL: ${PRINTER_MULTI_MATERIAL:-}
       PRINTER_DISPLAY_NAME: ${PRINTER_DISPLAY_NAME:-}
-      # Integrations (optional).
+      ADVANCED_PROFILES: ${ADVANCED_PROFILES:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
       WHATSAPP_NUMBER: ${WHATSAPP_NUMBER:-}
       CONTACT_EMAIL: ${CONTACT_EMAIL:-}
       GOOGLE_MAPS_EMBED_URL: ${GOOGLE_MAPS_EMBED_URL:-}
@@ -66,7 +59,6 @@ services:
       SHIPROCKET_EMAIL: ${SHIPROCKET_EMAIL:-}
       SHIPROCKET_PASSWORD: ${SHIPROCKET_PASSWORD:-}
       SHIPROCKET_PICKUP_PINCODE: ${SHIPROCKET_PICKUP_PINCODE:-}
-      # Limits and retention (defaults apply when empty).
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-}
       MAX_SESSION_UPLOAD_MB: ${MAX_SESSION_UPLOAD_MB:-}
       UPLOAD_WINDOW_MB: ${UPLOAD_WINDOW_MB:-}
@@ -79,15 +71,6 @@ services:
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-}
       SLICE_TIMEOUT_SECONDS: ${SLICE_TIMEOUT_SECONDS:-}
       LOG_LEVEL: ${LOG_LEVEL:-}
-    volumes:
-      # Everything durable: database, Redis, uploads, PDFs, generated secrets.
-      # PRINT_DATA_DIR set (an absolute path): that host directory. Unset: the
-      # named volume below.
-      - ${PRINT_DATA_DIR:-data}:/data
-      # OrcaSlicer exports to slice with, picked up at startup: printer/,
-      # process/ and filament/ (docs/SELF-HOSTING.md, "Your own printer or
-      # profiles"). Read-only: the shop never writes there.
-      - ${PRINT_PROFILES_DIR:-./profiles}:/profiles:ro
     # OrcaSlicer passes 4 GB RSS on ~220 MB STLs, and a parse of a model at the
     # MAX_XML_ELEMENTS ceiling can take ~3.4 GB while a slice runs; the database,
     # web and Redis share this limit too. Slicer and parse children run under
@@ -122,6 +105,3 @@ services:
       - /tmp:rw,nosuid,nodev,noexec,size=${PRINT_TMP_SIZE:-3g},mode=1777
     stop_grace_period: 40s
     restart: unless-stopped
-
-volumes:
-  data:

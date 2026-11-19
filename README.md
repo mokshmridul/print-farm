@@ -1,39 +1,40 @@
-# print.rish.pw — Instant 3D-Printing Quotation System
+# print-farm — Instant 3D-Printing Quotation System
 
-A production 3D-printing quotation app - [print.rish.pw](https://print.rish.pw). Customers upload STL / 3MF / OBJ / AMF
-models, every model is **actually sliced** with OrcaSlicer (Bambu Lab A1, 0.4 mm
-nozzle — no mathematical estimation), and they get a live, itemised quote they
-can tweak and submit. Submitting generates a PDF and hands off to WhatsApp.
-Includes marketing pages and a password-protected admin dashboard.
+A self-hosted 3D-printing quotation app for your own print shop. Customers
+upload STL / 3MF / OBJ / AMF models, every model is **actually sliced** with
+OrcaSlicer using your printer's profiles (no mathematical estimation), and they
+get a live, itemised quote they can tweak and submit. Submitting generates a
+PDF and hands off to WhatsApp. Includes marketing pages and a
+password-protected admin dashboard.
 
-> Part of the [rish.pw](https://rish.pw) repository. **Only the code is MIT
-> licensed** — site content, photos and generated PDFs are not licensed for reuse.
+The image ships with no shop data: no printer, brand, contact details or
+addresses. You choose the printer (any of OrcaSlicer's 300+ single-nozzle
+printers, or upload your own OrcaSlicer presets), and the shop takes no quotes
+until one is set up.
+
+> Forked from [print.rish.pw](https://github.com/zappymussel380/print.rish.pw).
+> **Only the code is MIT licensed** (see `LICENSE`).
 
 ## Run your own print shop
 
-One command sets up your own copy on an x86_64 Linux server — your name, rates,
-materials and contact details — with automatic HTTPS:
+Deploy it like any other self-hosted image — one container, one data folder,
+set up in the browser:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zappymussel380/print.rish.pw/main/install.sh | sudo bash
+mkdir print-farm && cd print-farm
+curl -fsSLO https://raw.githubusercontent.com/mokshmridul/print-farm/main/docker-compose.yml
+docker compose up -d
+docker compose logs | grep "setup code"
 ```
 
-Update later with `sudo /opt/print-shop/update.sh`. See
-[docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) for requirements, the HTTPS
-options, updates and rollback.
-
-Or run the image directly — everything is in one container with one data
-volume:
-
-```bash
-docker run -d --name print-farm -p 127.0.0.1:8080:8080 -v print-data:/data \
-  -e APP_ORIGIN=http://localhost:8080 ghcr.io/mokshmridul/print-farm:latest
-docker logs print-farm 2>&1 | grep -A2 "admin password"   # generated on first boot
-```
-
-It serves plain HTTP on :8080; put your reverse proxy or Cloudflare Tunnel in
-front for HTTPS. `docker-compose.yml` is the hardened version of the same
-(read-only root, dropped capabilities, memory limit).
+Open `http://<this computer>:7654/admin`, enter the setup code, create the
+admin password, and the setup tour walks you through your printer (any of
+OrcaSlicer's 360+, or your own presets), filaments and shop details.
+Everything is kept in `./data`. Update with `docker compose pull && docker
+compose up -d` (the database is backed up first). It serves plain HTTP on
+:7654; put your reverse proxy or Cloudflare Tunnel in front for HTTPS and tell
+the shop about it in admin → Settings → Server. See
+[docs/SELF-HOSTING.md](docs/SELF-HOSTING.md).
 
 ## What's inside
 

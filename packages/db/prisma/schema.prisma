@@ -1,4 +1,4 @@
-// print.rish.pw — quotation system schema.
+// print-farm — quotation system schema.
 // Money is always integer paise. Slice statistics are per single unit;
 // quantity multiplication happens in the pricing engine.
 

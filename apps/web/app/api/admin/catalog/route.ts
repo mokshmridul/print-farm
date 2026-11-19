@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { CUSTOM_MATERIAL_IDS, availabilitySchema, customMaterialProblem, normalizeAvailability, toPublicCatalog } from "@print/shared";
+import { MATERIAL_IDS, availabilitySchema, materialProblem, normalizeAvailability, toPublicCatalog } from "@print/shared";
 import { jsonError, readJsonBody, requireAdminApi } from "@/lib/api-util";
 import { assertSameOrigin } from "@/lib/security";
-import { getReadyCustomMaterials, getStoredCatalogAvailability, saveCatalogAvailability } from "@/lib/catalog-availability";
+import { getReadyMaterials, getStoredCatalogAvailability, saveCatalogAvailability } from "@/lib/catalog-availability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +14,7 @@ const MAX_BODY_BYTES = 64 * 1024;
 export async function GET() {
   const auth = await requireAdminApi();
   if (auth) return auth;
-  const [avail, ready] = await Promise.all([getStoredCatalogAvailability(), getReadyCustomMaterials()]);
+  const [avail, ready] = await Promise.all([getStoredCatalogAvailability(), getReadyMaterials()]);
   return NextResponse.json(toPublicCatalog(avail, ready));
 }
 
@@ -35,12 +35,12 @@ export async function PUT(request: NextRequest) {
     return jsonError(422, "BAD_REQUEST", "Invalid catalog availability payload");
   }
 
-  const [stored, ready] = await Promise.all([getStoredCatalogAvailability(), getReadyCustomMaterials()]);
+  const [stored, ready] = await Promise.all([getStoredCatalogAvailability(), getReadyMaterials()]);
   // Judge the switch-on against the names as stored: this editor never sets them.
   const wanted = { ...normalizeAvailability(parsed.data), customMaterials: stored.customMaterials };
-  const problems = CUSTOM_MATERIAL_IDS.flatMap((id) => {
+  const problems = MATERIAL_IDS.flatMap((id) => {
     if (!wanted.materials[id] || stored.materials[id]) return [];
-    const problem = customMaterialProblem(wanted, id, ready);
+    const problem = materialProblem(wanted, id, ready);
     return problem ? [problem] : [];
   });
   if (problems.length) return jsonError(422, "MATERIAL_NOT_READY", problems.join(" "));

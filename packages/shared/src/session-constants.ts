@@ -5,7 +5,7 @@
  * shared so the two cannot drift apart.
  */
 
-export const TOKEN_ISSUER = "print.rish.pw";
+export const TOKEN_ISSUER = "print-farm";
 export const QUOTE_AUDIENCE = "quote-session";
 export const ADMIN_AUDIENCE = "admin-session";
 

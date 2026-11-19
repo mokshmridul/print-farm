@@ -19,7 +19,12 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@print/db", () => ({
-  prisma: { uploadedModel: { count: mocks.count } },
+  prisma: {
+    uploadedModel: { count: mocks.count },
+    // A shop that takes quotes: PLA (on by default) has the owner's live preset.
+    appSetting: { findUnique: async () => null },
+    slicerProfileUpload: { findMany: async () => [{ id: "pla", slot: "filament:PLA", meta: { presetName: "Shop PLA" } }] },
+  },
 }));
 
 vi.mock("@/lib/env", () => ({

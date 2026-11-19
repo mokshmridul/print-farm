@@ -215,6 +215,20 @@ jobs:
       - name: Test
         run: pnpm -r test
 
+      - name: Give the test shop a filament preset
+        # No material has a built-in preset: until one of the owner's is live,
+        # nothing is on sale and every customer route answers SHOP_NOT_READY.
+        # One live PLA row, as a passed upload leaves it.
+        env:
+          MIGRATION_DATABASE_URL: postgresql://print_owner:ci-owner-password-000000000000000000000000@127.0.0.1:5432/print_integration
+        run: |
+          psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            INSERT INTO \"SlicerProfileUpload\" (id, \"batchId\", slot, \"originalName\", \"presetName\", raw, flattened, meta, status, \"testGrams\")
+            VALUES (gen_random_uuid(), gen_random_uuid(), 'filament:PLA', 'ci-pla.json', 'CI PLA',
+              '{\"name\": \"CI PLA\", \"inherits\": \"Generic PLA @System\"}',
+              '{\"type\": \"filament\", \"name\": \"CI PLA\", \"filament_type\": [\"PLA\"], \"filament_density\": [\"1.24\"]}',
+              '{\"presetName\": \"CI PLA\"}', 'ACTIVE', 3.8);"
+
       - name: Integration test
         env:
           MIGRATION_DATABASE_URL: postgresql://print_owner:ci-owner-password-000000000000000000000000@127.0.0.1:5432/print_integration
@@ -234,6 +248,10 @@ jobs:
           WORKER_CONCURRENCY: "1"
         run: |
           set -euo pipefail
+          # A configured printer (the hand-written test set): with none the
+          # shop takes no quotes, and every customer route answers SHOP_NOT_READY.
+          export PRINTER_SPEC_FILE="$GITHUB_WORKSPACE/apps/worker/test-fixtures/profile-set/printer.json"
+          export PROFILES_DIR="$GITHUB_WORKSPACE/apps/worker/test-fixtures/profile-set"
           flow_root="$(mktemp -d)"
           web_log="$flow_root/web.log"
           worker_log="$flow_root/worker.log"

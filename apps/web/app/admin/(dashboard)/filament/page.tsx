@@ -7,7 +7,7 @@ import { MaterialHelperEditor } from "@/components/admin/material-helper-editor"
 import { RatesEditor } from "@/components/admin/rates-editor";
 import { SlicerProfilesEditor } from "@/components/admin/slicer-profiles-editor";
 import { requireAdminPage } from "@/lib/admin-page";
-import { getReadyCustomMaterials, getStoredCatalogAvailability } from "@/lib/catalog-availability";
+import { getReadyMaterials, getStoredCatalogAvailability } from "@/lib/catalog-availability";
 import { getMaterialHelper } from "@/lib/material-helper";
 import { getPricing } from "@/lib/pricing-settings";
 import { advancedProfilesEnabled } from "@/lib/printer";
@@ -23,7 +23,7 @@ export default async function FilamentPage() {
   const [pricing, stored, ready, slicerProfiles, helper] = await Promise.all([
     getPricing(),
     getStoredCatalogAvailability(),
-    getReadyCustomMaterials(),
+    getReadyMaterials(),
     getSlicerProfilesState(),
     getMaterialHelper(),
   ]);

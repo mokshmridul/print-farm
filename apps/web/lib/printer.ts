@@ -1,11 +1,13 @@
 import { readFileSync } from "node:fs";
 import { cache } from "react";
+import { getCatalogAvailability } from "./catalog-availability";
 import { prisma } from "@print/db";
 import {
-  CUSTOM_FILAMENT_SLOTS,
-  DEFAULT_PRINTER_SPEC,
+  FILAMENT_SLOTS,
+  UNCONFIGURED_PRINTER_SPEC,
   applyActiveProfiles,
   parsePrinterSpec,
+  printerReady,
   slotInScope,
   type PrinterProfileSpec,
 } from "@print/shared";
@@ -13,19 +15,19 @@ import {
 let cached: PrinterProfileSpec | null = null;
 
 /** The printer this shop quotes for as installed: the `printer.json` the
- *  self-host installer generated beside the worker's profiles
- *  (PRINTER_SPEC_FILE), or the Bambu Lab A1 when unset — print.rish.pw's own
- *  setup. Read once per process; changing printer restarts the containers.
+ *  image generated beside the worker's profiles (PRINTER_SPEC_FILE). Unset or
+ *  unreadable: no printer is set up, and the shop takes no quotes. Read once
+ *  per process; changing printer restarts the container.
  *  Its name is what customers see; for anything slicing depends on (build
  *  volume, cache keys) use getPrinterProfile. */
 export function getPrinterSpec(): PrinterProfileSpec {
   if (cached) return cached;
   const file = process.env.PRINTER_SPEC_FILE;
-  if (!file) return (cached = DEFAULT_PRINTER_SPEC);
+  if (!file) return (cached = UNCONFIGURED_PRINTER_SPEC);
   try {
     cached = parsePrinterSpec(JSON.parse(readFileSync(file, "utf8")));
   } catch {
-    cached = DEFAULT_PRINTER_SPEC;
+    cached = UNCONFIGURED_PRINTER_SPEC;
   }
   return cached;
 }
@@ -45,9 +47,26 @@ export const getPrinterProfile = cache(async (): Promise<PrinterProfileSpec> => 
   const base = getPrinterSpec();
   const advanced = advancedProfilesEnabled();
   const rows = await prisma.slicerProfileUpload.findMany({
-    where: advanced ? { status: "ACTIVE" } : { status: "ACTIVE", slot: { in: [...CUSTOM_FILAMENT_SLOTS] } },
+    where: advanced ? { status: "ACTIVE" } : { status: "ACTIVE", slot: { in: [...FILAMENT_SLOTS] } },
     select: { id: true, slot: true, meta: true },
   });
   const live = rows.filter((r) => r.slot && slotInScope(r.slot, advanced));
   return applyActiveProfiles(base, live.map((r) => ({ ...r, slot: r.slot! })));
 });
+
+/** What still stands between the shop and its first quote: a printer (picked
+ *  from OrcaSlicer's list, or the owner's own preset live), and a material on
+ *  sale — none has a built-in preset, so one needs the owner's. */
+export async function shopSetupGaps(): Promise<{ printer: boolean; material: boolean }> {
+  const printer = printerReady(getPrinterSpec()) || printerReady(await getPrinterProfile().catch(() => getPrinterSpec()));
+  const { materials } = await getCatalogAvailability();
+  return { printer: !printer, material: !Object.values(materials).some(Boolean) };
+}
+
+/** Whether customers can upload and get quotes. */
+export async function shopReady(): Promise<boolean> {
+  const gaps = await shopSetupGaps();
+  return !gaps.printer && !gaps.material;
+}
+
+export const SHOP_NOT_READY_MESSAGE = "This shop isn't taking quotes yet — it's still being set up.";

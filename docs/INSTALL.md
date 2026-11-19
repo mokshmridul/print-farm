@@ -74,11 +74,11 @@ from credentials. `ALLOW_INSECURE_SLICER=true` is an explicit local-only escape
 hatch and gives hostile native code access to worker credentials/uploads.
 
 For end-to-end slicing, build and run the image (no `.env` needed for a local
-try; it serves `http://localhost:8080`):
+try; it serves `http://localhost:7654`):
 
 ```bash
 docker compose up -d --build
-docker compose logs | grep -A2 "admin password"
+docker compose logs | grep "setup code"   # then open http://localhost:7654/admin
 ```
 
 `scripts/ci/image-smoke.sh <image>` runs the same end-to-end check CI does. See

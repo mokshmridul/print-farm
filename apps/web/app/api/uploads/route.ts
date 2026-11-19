@@ -17,6 +17,7 @@ import {
 } from "@print/shared";
 import { assertBodySize, guardMutation, jsonError } from "@/lib/api-util";
 import { env } from "@/lib/env";
+import { SHOP_NOT_READY_MESSAGE, shopReady } from "@/lib/printer";
 import {
   getIngestCountAhead,
   releaseIngestAdmission,
@@ -133,6 +134,7 @@ async function streamUpload(request: NextRequest): Promise<StreamedFile | null> 
 export async function POST(request: NextRequest) {
   const guard = await guardMutation(request, "upload", RATE_LIMITS.upload);
   if (guard) return guard;
+  if (!(await shopReady())) return jsonError(503, "SHOP_NOT_READY", SHOP_NOT_READY_MESSAGE);
 
   // Multipart framing adds a small amount around the file itself. Reject a
   // declared oversized request before touching the body; busboy remains the

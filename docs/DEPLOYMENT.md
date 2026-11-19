@@ -1,11 +1,11 @@
 # Deployment
 
 Production is one container — the print-farm image — behind one public reverse
-proxy. The edge terminates TLS and reaches the container's port 8080 only over
+proxy. The edge terminates TLS and reaches the container's port 7654 only over
 a private/LAN/Tailscale route.
 
 ```text
-Internet -> public reverse proxy (TLS) -> private route -> :8080 print-farm container
+Internet -> public reverse proxy (TLS) -> private route -> :7654 print-farm container
                                                             nginx -> web (127.0.0.1:3000)
                                                             worker, PostgreSQL, Redis (127.0.0.1 only)
 ```
@@ -39,17 +39,17 @@ worker role and the schema owner each get their own.
 
 Set:
 
-- `APP_ORIGIN=https://print.rish.pw`
-- `PROXY_BIND` to the private host address reached by the edge, never
-  `0.0.0.0`
+- `APP_ORIGIN=https://print.example.com`
+- `PRINT_PORT` to `<private host address>:7654`, the address reached by the
+  edge, never all interfaces on a public server
 - `TRUSTED_PROXY_CIDR` to the exact source host seen from inside the
   container: one IPv4 address (no prefix or `/32`) or unbracketed IPv6 address
   (no prefix or `/128`). Docker preserves the source address of traffic arriving
-  on a non-loopback `PROXY_BIND`; a proxy on the same host using a loopback bind
+  on a non-loopback published address; a proxy on the same host using a loopback bind
   appears as the Docker network's gateway instead.
-- the admin login: `ADMIN_PASSWORD` (hashed on first boot), a pinned
-  `ADMIN_PASSWORD_HASH` in single quotes, or neither and read the generated one
-  from the first boot's logs
+- the admin login: neither `ADMIN_PASSWORD` nor `ADMIN_PASSWORD_HASH`, and
+  create it on the first visit with the setup code from the logs; or pin one of
+  them (a hash in single quotes)
 - optional provider/business values documented in [ENV.md](ENV.md)
 
 Moving an existing deployment here? Pin its `SESSION_SECRET` in `.env` (admin
@@ -89,13 +89,13 @@ docker compose exec print-farm print-farm health && echo healthy
 ```
 
 After the outer edge is configured, also verify the complete trusted path with
-`curl --fail --silent --show-error https://print.rish.pw/api/health`. A host-side
+`curl --fail --silent --show-error https://print.example.com/api/health`. A host-side
 curl to the private bind may correctly receive 403 because the container's
 nginx accepts HTTP only from `TRUSTED_PROXY_CIDR`.
 
 ## 4. Public reverse proxy
 
-There must be only one public ingress. Firewall port 8080 so only that
+There must be only one public ingress. Firewall port 7654 so only that
 exact proxy host can reach it. The outer edge must redirect HTTP, terminate TLS,
 **overwrite** (not append or preserve) `X-Real-IP` and `X-Forwarded-For` with the
 TCP client's address, set the original scheme, omit query strings and referrers
@@ -113,13 +113,13 @@ log_format print_no_args '$remote_addr - $remote_user [$time_local] '
 
 server {
     listen 80;
-    server_name print.rish.pw;
+    server_name print.example.com;
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl http2;
-    server_name print.rish.pw;
+    server_name print.example.com;
     # ssl_certificate / ssl_certificate_key managed by your ACME client
 
     access_log /var/log/nginx/print.access.log print_no_args;
@@ -139,7 +139,7 @@ server {
         client_max_body_size 301m;
         client_body_timeout 120s;
         proxy_request_buffering off;
-        proxy_pass http://<PROXY_BIND_ADDRESS>:8080;
+        proxy_pass http://<PROXY_BIND_ADDRESS>:7654;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -149,7 +149,7 @@ server {
     }
 
     location / {
-        proxy_pass http://<PROXY_BIND_ADDRESS>:8080;
+        proxy_pass http://<PROXY_BIND_ADDRESS>:7654;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -183,14 +183,14 @@ small JSON endpoints become buffering/slow-body targets at the edge.
 - Confirm NPM's generated location overwrites both `X-Real-IP` and
   `X-Forwarded-For` with `$remote_addr`; it must not pass a browser-supplied
   forwarding chain through unchanged.
-- Set `TRUSTED_PROXY_CIDR` and the port-8080 firewall allowlist to the one NPM
+- Set `TRUSTED_PROXY_CIDR` and the port-7654 firewall allowlist to the one NPM
   source host as observed by the container.
 
 ### Verify the proxy trust cutover
 
 Perform this before opening production traffic:
 
-1. Firewall port 8080 to the expected outer edge source first. Do not temporarily
+1. Firewall port 7654 to the expected outer edge source first. Do not temporarily
    expose it publicly to discover the source address. Set the expected exact host
    in `TRUSTED_PROXY_CIDR`; if NAT makes it uncertain, use a deliberately
    nonmatching host such as `127.0.0.1` for this short discovery window.
@@ -204,18 +204,18 @@ Perform this before opening production traffic:
    must have the same expected `peer` but distinct, correct `client` addresses.
    If `peer` and `client` remain identical, the trusted host is wrong or the
    outer edge did not overwrite `X-Real-IP`.
-4. From the trusted edge host only, make a direct probe to port 8080 with a
+4. From the trusted edge host only, make a direct probe to port 7654 with a
    reserved test address such as `X-Real-IP: 192.0.2.123`; the container log should
    show the edge as `peer` and the marker as `client`. Then confirm a non-edge
-   host cannot connect to port 8080 at all. If a controlled firewall test does
+   host cannot connect to port 7654 at all. If a controlled firewall test does
    let that host connect, the container's nginx must return 403 without proxying it.
 
 Trust a NAT/subnet-router address only when the firewall guarantees that other
-clients sharing that source cannot reach port 8080. The validator intentionally
+clients sharing that source cannot reach port 7654. The validator intentionally
 does not permit trusting an entire Docker, LAN, or tailnet subnet.
 
 For local-only routing use a separate LAN name or split DNS. Do not create a
-second publicly reachable path to port 8080.
+second publicly reachable path to port 7654.
 
 ## 5. Operations
 

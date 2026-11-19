@@ -106,7 +106,7 @@ describe("download", () => {
   it("has every saved setting and the live presets, never a password or key", async () => {
     seedShop();
     const res = await route.GET();
-    expect(res.headers.get("content-disposition")).toMatch(/^attachment; filename="print-rish-pw-settings-\d{4}-\d{2}-\d{2}\.json"$/);
+    expect(res.headers.get("content-disposition")).toMatch(/^attachment; filename="print-shop-settings-\d{4}-\d{2}-\d{2}\.json"$/);
     expect(res.headers.get("cache-control")).toBe("no-store");
     const backup = await res.json();
     expect(backup).toMatchObject({ format: "print-shop-settings", version: 1 });
@@ -208,6 +208,7 @@ describe("restore", () => {
     db.rows.clear();
     vi.stubEnv("SHIPROCKET_EMAIL", "env@shop.test");
     vi.stubEnv("SHIPROCKET_PASSWORD", "env-pw");
+    vi.stubEnv("SHIPROCKET_PICKUP_PINCODE", "560001");
 
     const { json } = await restore({ ...backup, presets: [] });
     expect(db.rows.has("shipping")).toBe(false);

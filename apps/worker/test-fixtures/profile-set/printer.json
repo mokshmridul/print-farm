@@ -1,0 +1,15 @@
+{
+  "id": "test-printer-0-4-nozzle",
+  "machine": "Test Printer 0.4 nozzle",
+  "name": "Test Printer",
+  "vendor": "Test",
+  "nozzleMm": 0.4,
+  "bedMm": [
+    220,
+    220,
+    250
+  ],
+  "multiMaterial": false,
+  "plates": {},
+  "generated": true
+}

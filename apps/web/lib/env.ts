@@ -101,8 +101,11 @@ function databaseUrl(): string {
   return raw;
 }
 
-function bcryptHash(): string {
-  const value = required("ADMIN_PASSWORD_HASH");
+/** The admin password hash the environment sets, or null: then the owner's
+ *  own, kept in the database (lib/admin-auth.ts). */
+function bcryptHash(): string | null {
+  const value = process.env.ADMIN_PASSWORD_HASH ?? "";
+  if (value === "") return null;
   const match = /^\$2[aby]\$(\d{2})\$[./A-Za-z0-9]{53}$/.exec(value);
   if (!match || Number(match[1]) < 12) {
     throw new Error("ADMIN_PASSWORD_HASH must be a valid bcrypt hash with cost 12 or higher");
@@ -130,6 +133,21 @@ export const env = {
   },
   get adminPasswordHash() {
     return bcryptHash();
+  },
+  /** One-time first-run code (container log) that lets the first visitor
+   *  create the admin password; "" once there is one. */
+  get setupCode() {
+    return (process.env.SETUP_CODE ?? "").trim();
+  },
+  get serverSettingsFile() {
+    return process.env.SERVER_SETTINGS_FILE ?? "";
+  },
+  get printersFile() {
+    return process.env.PRINTERS_FILE ?? "";
+  },
+  /** Settings the container's environment sets, which the browser can't change. */
+  get serverSettingsLocked(): ReadonlySet<string> {
+    return new Set((process.env.SERVER_SETTINGS_LOCKED ?? "").split(",").filter(Boolean));
   },
   get appOrigin() {
     return appOrigin();
@@ -172,9 +190,10 @@ export const env = {
     return Math.min(int("QUOTATION_RETENTION_DAYS", 90), 90);
   },
   // Contact form sender until admin → Settings → Email is saved (see
-  // lib/mail-settings.ts, which reads RESEND_API_KEY / MAIL_TO itself).
+  // lib/mail-settings.ts, which reads RESEND_API_KEY / MAIL_TO itself). No
+  // default: without one, mail stays off until the owner sets a sender.
   get contactFrom() {
-    return process.env.CONTACT_FROM ?? "print.rish.pw <contact@rish.pw>";
+    return (process.env.CONTACT_FROM ?? "").trim();
   },
   // Optional Telegram order notifications. Empty values disable notifications
   // without affecting checkout.
@@ -193,6 +212,6 @@ export const env = {
   // Shiprocket rate calculator, when admin → Shipping hasn't been saved (see
   // lib/shipping-settings.ts, which reads SHIPROCKET_EMAIL/PASSWORD itself).
   get shiprocketPickupPincode() {
-    return process.env.SHIPROCKET_PICKUP_PINCODE ?? "781001";
+    return (process.env.SHIPROCKET_PICKUP_PINCODE ?? "").trim();
   },
 };

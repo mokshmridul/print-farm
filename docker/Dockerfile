@@ -2,7 +2,7 @@
 #
 # print-farm: the whole print shop in one image.
 #
-#   docker run -d --name print-farm -p 127.0.0.1:8080:8080 \
+#   docker run -d --name print-farm -p 127.0.0.1:7654:7654 \
 #     -e APP_ORIGIN=https://print.example.com -v print-data:/data \
 #     ghcr.io/mokshmridul/print-farm:latest
 #
@@ -14,7 +14,7 @@
 #   web       Next.js as the unprivileged nextjs user, on 127.0.0.1:3000
 #   worker    BullMQ slicing worker (root orchestrator; every OrcaSlicer and
 #             parse job is dropped to its own credential-free uid)
-#   nginx     the only listener visible outside: :8080, plain HTTP
+#   nginx     the only listener visible outside: :7654, plain HTTP
 #
 # HTTPS is always provided in front of this container (your reverse proxy,
 # Cloudflare Tunnel, ...). See docs/SELF-HOSTING.md and docs/DEPLOYMENT.md.
@@ -129,18 +129,18 @@ RUN pnpm --filter @print/db generate \
     && pnpm --filter @print/db deploy --legacy /opt/migrate \
     && pnpm --filter @print/worker deploy --legacy --prod /opt/worker-app \
     && find /opt/worker-app -type f \( -name '*.test.ts' -o -name '*.test.js' \) -delete \
-    && rm -rf /opt/worker-app/test-fixtures /opt/worker-app/src /opt/worker-app/build.mjs
+    && rm -rf /opt/worker-app/test-fixtures /opt/worker-app/src /opt/worker-app/build.mjs /opt/worker-app/vitest.config.ts
 # Admin-password hashing with the lockfile's own bcryptjs — the library the
 # login route verifies with. Next bundles it into the server, so the standalone
 # output has no importable copy; bundle the helper into one self-contained file.
 RUN cd apps/worker && ./node_modules/.bin/esbuild ../web/scripts/hash-password.mjs \
         --bundle --platform=node --format=esm --target=node24 \
         --outfile=/opt/tools/hash-password.mjs
-# The installer's profile sorter (OrcaSlicer exports → profiles/printer|process|
-# filament/), bundled the same way with the shared preset parser.
-RUN cd apps/worker && ./node_modules/.bin/esbuild src/profile-import.ts \
+# The root-side reader of the owner's server settings (/data/config/
+# settings.json), bundled the same way with the shared validation.
+RUN cd apps/worker && ./node_modules/.bin/esbuild src/read-settings.ts \
         --bundle --platform=node --format=esm --target=node24 \
-        --outfile=/opt/tools/sort-profiles.mjs
+        --outfile=/opt/tools/read-settings.mjs
 
 # ---------- runtime ----------
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03
@@ -247,10 +247,14 @@ COPY docker/proxy/nginx.conf /usr/local/lib/print-farm/nginx-site.conf.template
 COPY docker/rootfs/ /
 ARG VERSION=dev
 ARG REVISION=unknown
+# printers.tsv: every printer the shop can be set up with, for the setup tour's
+# list and for checking the owner's choice (vendor, model, preset, build volume).
 RUN chmod 0755 /usr/local/bin/print-farm /usr/local/lib/print-farm/*.sh \
     && find /etc/s6-overlay/s6-rc.d -name run -exec chmod 0755 {} + \
     && printf 'print-farm %s (%s)\n' "${VERSION}" "${REVISION}" > /etc/print-farm/version \
-    && mkdir -p /data /profiles
+    && mkdir -p /data /profiles \
+    && node /app/worker/dist/profile-gen.js list > /etc/print-farm/printers.tsv \
+    && test "$(wc -l < /etc/print-farm/printers.tsv)" -gt 100
 
 LABEL org.opencontainers.image.title="print-farm" \
       org.opencontainers.image.description="Instant 3D-printing quotation system: web, slicing worker, PostgreSQL, Redis and nginx in one image" \
@@ -261,7 +265,7 @@ LABEL org.opencontainers.image.title="print-farm" \
 # Everything durable: database, Redis, uploads, PDFs, generated secrets and
 # printer profiles. Back it up as one unit (docs/MAINTENANCE.md).
 VOLUME ["/data"]
-EXPOSE 8080
+EXPOSE 7654
 HEALTHCHECK --interval=15s --timeout=10s --start-period=180s --retries=5 \
     CMD ["/usr/local/bin/print-farm", "health"]
 ENTRYPOINT ["/init"]

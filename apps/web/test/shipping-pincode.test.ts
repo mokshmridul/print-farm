@@ -34,7 +34,7 @@ beforeEach(() => {
   mocks.getQuoteSessionId.mockResolvedValue("11111111-1111-4111-8111-111111111111");
   mocks.rateLimit.mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
   mocks.findMany.mockResolvedValue([]);
-  mocks.getShippingConfig.mockResolvedValue({ live: true, email: "api@shop.test", password: "pw", pickupPincode: "781001" });
+  mocks.getShippingConfig.mockResolvedValue({ live: true, email: "api@shop.test", password: "pw", pickupPincode: "110001" });
 });
 
 describe("POST /api/shipping pincode validation", () => {
@@ -67,7 +67,7 @@ describe("POST /api/shipping pincode validation", () => {
   });
 
   it("gets past the pincode gate on a well-formed one", async () => {
-    mocks.readJsonBody.mockResolvedValue({ ok: true, value: { deliveryPincode: "781001", items: [] } });
+    mocks.readJsonBody.mockResolvedValue({ ok: true, value: { deliveryPincode: "110001", items: [] } });
 
     const res = await POST(fakeReq());
 
@@ -80,7 +80,7 @@ describe("POST /api/shipping pincode validation", () => {
 
 describe("POST /api/shipping when the shop hasn't set shipping up", () => {
   it("answers 503 before the session, rate limits or body", async () => {
-    mocks.getShippingConfig.mockResolvedValue({ live: false, email: "", password: "", pickupPincode: "781001" });
+    mocks.getShippingConfig.mockResolvedValue({ live: false, email: "", password: "", pickupPincode: "110001" });
     const res = await POST(fakeReq());
     expect(res.status).toBe(503);
     expect(await res.json()).toMatchObject({ error: { code: "NOT_CONFIGURED" } });
