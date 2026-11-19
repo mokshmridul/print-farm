@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { redirect } from "next/navigation";
 import { AdminNav } from "@/components/admin/admin-nav";
 import { requireAdminPage } from "@/lib/admin-page";
+import { shouldOfferSetup } from "@/lib/setup-wizard";
 
 export const metadata: Metadata = {
   title: "Admin",
@@ -13,6 +15,8 @@ export const dynamic = "force-dynamic";
 /** Every admin section: the nav, then the section's page. */
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   await requireAdminPage();
+  // A new advanced-mode shop starts with the guided setup of its presets.
+  if (await shouldOfferSetup()) redirect("/admin/setup");
   return (
     <div className="mx-auto max-w-6xl px-5 py-10">
       <p className="eyebrow">Admin</p>

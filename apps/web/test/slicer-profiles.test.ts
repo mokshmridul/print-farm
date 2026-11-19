@@ -187,6 +187,34 @@ describe("/api/admin/slicer-profiles", () => {
     expect(JSON.stringify(state)).not.toContain("filament_density");
   });
 
+  it("takes no uploads, and no switch back, for a slot the profiles folder fills", async () => {
+    // folderManagedSlots: the folder's live and in-test rows; the rest of the
+    // state is read with the same mock, so answer by the query's shape.
+    db.findMany.mockImplementation(async ({ where }: { where?: { source?: string } }) =>
+      where?.source === "folder" ? [{ slot: "filament:PLA", status: "ACTIVE", source: "folder" }] : [],
+    );
+    const res = await POST(req("?slot=filament:PLA&name=my-pla.json"));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.message).toMatch(/profiles folder/);
+    expect((await DELETE(req("?slot=filament:PLA"))).status).toBe(409);
+    expect(db.createMany).not.toHaveBeenCalled();
+    expect(db.updateMany).not.toHaveBeenCalled();
+    // Other slots are as before.
+    expect((await POST(req("?slot=filament:PETG&name=petg.json"))).status).not.toBe(409);
+  });
+
+  it("marks the slots the profiles folder fills, and its batches", async () => {
+    db.findMany.mockImplementation(async ({ where }: { where?: { status?: unknown; batchId?: unknown } }) =>
+      where?.batchId
+        ? [{ batchId: "b", slot: "process:200", originalName: "profiles/process/fine.json", presetName: "Fine", status: "ACTIVE", error: null, createdAt: new Date(), source: "folder" }]
+        : [{ id: "r", batchId: "b", slot: "process:200", originalName: "profiles/process/fine.json", presetName: "Fine", status: "ACTIVE", error: null, testGrams: 3, createdAt: new Date(), checkedAt: new Date(), source: "folder" }],
+    );
+    const state = await (await GET()).json();
+    const rows = state.slots.filter((s: { fromFolder: boolean }) => s.fromFolder);
+    expect(rows.map((s: { slot: string }) => s.slot)).toEqual(["process:200"]);
+    expect(state.uploads[0].source).toBe("folder");
+  });
+
   it("puts a slot back on the installed preset", async () => {
     expect((await DELETE(req("?slot=process:160"))).status).toBe(200);
     expect(db.updateMany).toHaveBeenCalledWith({

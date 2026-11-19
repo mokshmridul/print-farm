@@ -84,6 +84,10 @@ services:
       # PRINT_DATA_DIR set (an absolute path): that host directory. Unset: the
       # named volume below.
       - ${PRINT_DATA_DIR:-data}:/data
+      # OrcaSlicer exports to slice with, picked up at startup: printer/,
+      # process/ and filament/ (docs/SELF-HOSTING.md, "Your own printer or
+      # profiles"). Read-only: the shop never writes there.
+      - ${PRINT_PROFILES_DIR:-./profiles}:/profiles:ro
     # OrcaSlicer passes 4 GB RSS on ~220 MB STLs, and a parse of a model at the
     # MAX_XML_ELEMENTS ceiling can take ~3.4 GB while a slice runs; the database,
     # web and Redis share this limit too. Slicer and parse children run under

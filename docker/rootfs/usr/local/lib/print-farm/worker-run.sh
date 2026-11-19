@@ -39,7 +39,7 @@ pass_env e MAX_UPLOAD_MB 300
 pass_env e MAX_SESSION_UPLOAD_MB 900
 pass_env e MAX_MODELS_PER_SESSION 20
 pass_env e STORAGE_RESERVE_MB 2048
-pass_env e ADVANCED_PROFILES 0
+e+=("ADVANCED_PROFILES=$(advanced_profiles)")
 [ -f "$PRINTER_DIR/.stamp" ] && e+=("PROFILES_DIR=$PRINTER_DIR")
 
 install -d -m 0755 /tmp/orca-home /tmp/orca-data

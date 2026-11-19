@@ -124,6 +124,14 @@ export function SlicerProfilesEditor({ initial }: { initial: SlicerProfilesState
             Preset Bundle → Printer bundle) or single presets as .json. Every upload is test-sliced before it
             replaces anything, and a row without an upload keeps the preset the installer set up.
           </p>
+          <p className="mt-1 text-xs text-faint">
+            Rows marked <span className="text-accent">from the profiles folder</span> come from the files in the
+            profiles folder on the server (printer/, process/, filament/): change or remove a file there and restart
+            the shop to update them.{" "}
+            <a href="/admin/setup" className="underline">
+              Guided setup
+            </a>
+          </p>
         </div>
 
         <input
@@ -155,9 +163,11 @@ export function SlicerProfilesEditor({ initial }: { initial: SlicerProfilesState
                     ) : (
                       "Installed preset"
                     )}
-                    {row.testing ? <span className="text-accent"> · testing an upload…</span> : null}
+                    {row.testing ? <span className="text-accent"> · testing…</span> : null}
+                    {row.fromFolder ? <span className="text-accent"> · from the profiles folder</span> : null}
                   </p>
                 </div>
+                {row.fromFolder ? null : (
                 <div className="flex gap-2">
                   <button type="button" className="btn-ghost text-sm disabled:opacity-40" disabled={busy} onClick={() => pick(row.slot)}>
                     {busy ? "Working…" : row.slot === "machine" ? "Upload printer" : "Upload"}
@@ -168,6 +178,7 @@ export function SlicerProfilesEditor({ initial }: { initial: SlicerProfilesState
                     </button>
                   ) : null}
                 </div>
+                )}
               </li>
             );
           })}
@@ -187,7 +198,8 @@ export function SlicerProfilesEditor({ initial }: { initial: SlicerProfilesState
               {state.uploads.map((u) => (
                 <li key={u.batchId} className="text-xs">
                   <p>
-                    <span className="font-[600] text-muted">{u.originalName}</span>{" "}
+                    <span className="font-[600] text-muted">{u.originalName}</span>
+                    {u.source === "folder" ? <span className="text-faint"> (profiles folder)</span> : null}{" "}
                     <span className={u.status === "failed" ? "text-danger" : "text-faint"}>· {STATUS_TEXT[u.status]}</span>
                   </p>
                   {u.error ? <p className="mt-0.5 text-danger">{u.error}</p> : null}

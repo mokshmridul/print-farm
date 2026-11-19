@@ -11,6 +11,7 @@ import {
   SLICE_PIPELINE_VERSION,
   UUID_RE,
   sliceArtifactKey,
+  slicerProfileJobId,
   sliceSettingsSchema,
   type IngestJobData,
   type IngestJobResult,
@@ -26,6 +27,7 @@ import { INGEST_WORKER_OPTIONS, processIngestJob, terminalCleanup } from "./inge
 import { renderThumbnailIsolated } from "./parse-runner.js";
 import { runSlice } from "./orca.js";
 import { activeProfileSet } from "./profile-set.js";
+import { folderPeers, syncProfilesFolder } from "./profile-folder.js";
 import { markBatchFailed, orcaIndex, processProfileBatch } from "./profile-test.js";
 import { slicerPool } from "./slicer-pool.js";
 import { loadRetentionPolicy, runRetention } from "./retention.js";
@@ -426,10 +428,32 @@ const profileWorker = new Worker<SlicerProfileJobData>(
   SLICER_PROFILE_QUEUE,
   async (job) => {
     if (!UUID_RE.test(job.data.batchId)) throw new Error("Profile job has an invalid batch id");
-    await processProfileBatch(job.data.batchId, { index: orcaIndex, advanced: config.advancedProfiles });
+    await processProfileBatch(job.data.batchId, {
+      index: orcaIndex,
+      advanced: config.advancedProfiles,
+      folderPeers: () => folderPeers(config.profilesFolder),
+    });
   },
   { connection: redisOptions(), concurrency: 1 },
 );
+
+// The profiles folder (OrcaSlicer exports the owner keeps on the server): new
+// and changed presets are queued for the same test slice as an upload, and
+// slots whose file was taken out go back to the installed preset. A bad folder
+// never stops the worker; what's wrong shows in admin → Slicer profiles.
+const profileQueue = new Queue<SlicerProfileJobData>(SLICER_PROFILE_QUEUE, { connection: redisOptions() });
+try {
+  await syncProfilesFolder({
+    root: config.profilesFolder,
+    flatten: (kind, raw, peers) => orcaIndex().flattenPreset(kind, raw, peers),
+    enqueue: async (batchId) => {
+      await profileQueue.add("test", { batchId }, { jobId: slicerProfileJobId(batchId) });
+    },
+    log,
+  });
+} catch (error) {
+  log.error({ err: String(error) }, "could not sync the profiles folder");
+}
 profileWorker.on("failed", (job, err) => {
   log.error({ jobId: job?.id, err: err.message }, "profile test errored");
   if (job && UUID_RE.test(job.data.batchId)) {

@@ -133,4 +133,16 @@ chmod 0640 /run/nginx/site.conf
 # changes). Unset: the committed, hand-tuned Bambu Lab A1 set.
 "$LIB_DIR/printer-profiles.sh"
 
+# ── Profiles folder ───────────────────────────────────────────────────────────
+# OrcaSlicer exports the owner keeps in printer/ process/ filament/ (mounted
+# read-only at /profiles). The worker syncs them into the live presets; any
+# preset there opens every slot to them, as advanced mode does, so web and
+# worker both run in advanced mode. The installer's base printer is unchanged.
+rm -f "$RUN_DIR/profiles-folder"
+if [ -n "$(find "$PROFILES_DIR"/printer "$PROFILES_DIR"/process "$PROFILES_DIR"/filament -maxdepth 2 -type f \
+      \( -iname '*.json' -o -iname '*.orca_printer' -o -iname '*.orca_filament' \) -print -quit 2>/dev/null)" ]; then
+  : > "$RUN_DIR/profiles-folder"
+  log "Profiles folder has presets: advanced profiles on"
+fi
+
 log "Ready"

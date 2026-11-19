@@ -40,8 +40,8 @@ running the installer again (see [after that](#after-install)).
    (e.g. `AP-2026-0001`), a one-line tagline, and your city.
 2. **Your printer:** pick the brand, then the model (with its build volume),
    and say whether it has an AMS/MMU for automatic multicolour. Using your own
-   tuned OrcaSlicer presets? Choose **2) Skip** and upload them in the admin
-   dashboard later (see [below](#your-own-printer-or-profiles-advanced-mode)).
+   tuned OrcaSlicer presets? Choose **2) My own tuned OrcaSlicer presets**
+   (see [below](#your-own-printer-or-profiles-advanced-mode)).
 3. **Web address:** your domain, and what provides HTTPS in front of the shop
    (see [HTTPS options](#https-options)).
 4. **Admin password:** for `https://your-domain/admin`.
@@ -170,31 +170,74 @@ old quotations.
 ## Your own printer or profiles (advanced mode)
 
 Is your printer missing from OrcaSlicer's list (a Voron, a modded Ender, a
-self-build), or do you slice with profiles you've tuned yourself? At the
-printer question, choose **2) Skip — I'll upload my own tuned OrcaSlicer
-presets**. The installer then only asks the printer name customers see (e.g.
-*Voron 2.4 300*) and whether it does automatic multicolour. Until you upload,
-quotes use a generic Klipper preset, so upload before you share the site.
+self-build), or do you slice with profiles you've tuned yourself? Then the shop
+slices with your own OrcaSlicer presets, **exactly as OrcaSlicer exports
+them**: you never edit a file, you hand it over. There are two ways, and you
+can use both:
 
-The admin dashboard then has a **Slicer profiles** section. There you upload
-the presets you use in OrcaSlicer:
-- **A whole printer:** in OrcaSlicer, *File → Export → Export Preset Bundle →
-  Printer bundle* gives an `.orca_printer` file. Upload it on the **Printer**
-  row. Its process presets at 0.12, 0.16 and 0.20 mm are used for those layer
-  heights; anything else in it is listed as skipped.
-- **Single presets:** export a printer, process or filament preset as `.json`
-  (or a filament bundle, `.orca_filament`) and upload it on the row it's for:
-  a layer height, or a material.
+- **Guided, in the browser.** At the installer's printer question choose
+  **2) My own tuned OrcaSlicer presets** and press Enter at the file question.
+  The first time you open the admin dashboard, a setup page walks you through
+  it: your printer, then process presets, then filaments. It suggests where each
+  file goes (from its layer height or filament type) and you confirm. You can
+  open it again any time from Filament → Slicer profiles → *Guided setup*.
+- **A folder on the server.** Put the files in the install folder's
+  `profiles/` folder (or answer the installer's file question with a file or
+  folder of exports, and it sorts them in for you). The shop picks them up
+  every time it starts.
 
-Every upload is **test-sliced** on a 20 mm cube with the rest of your live
-presets before it replaces anything. If OrcaSlicer rejects it, you see its
-error and quotes keep using what was live. A row you haven't uploaded to uses
-the installed generic preset, and **Use installed** puts a row back on it.
+What to export from OrcaSlicer:
+
+- **Your printer:** *File → Export → Export Preset Bundle → Printer bundle*
+  gives an `.orca_printer` file: the printer and its process presets. Its 0.12,
+  0.16 and 0.20 mm processes are used for those layer heights.
+- **Single presets:** a printer, process or filament preset as `.json`, or a
+  filament bundle (`.orca_filament`) holding one filament.
+
+Every preset is **test-sliced** on a 20 mm cube with the rest of your live
+presets before quotes use it. If OrcaSlicer rejects it, you see its error
+(Filament → Slicer profiles) and quotes keep using what was live. Anything you
+don't provide uses the generic preset the installer set up.
+
+### The profiles folder
+
+```
+profiles/
+  printer/    your printer: one .orca_printer bundle (or the printer's .json)
+  process/    process presets (.json) — each is used for the layer height it prints at
+  filament/   filament presets (.json / .orca_filament) — each goes to the material
+              its filament type names: PLA, PLA-CF, PETG, ABS, ASA or TPU
+    PLA_AESTHETIC/   …or to the material its folder is named for:
+    PETG_PREMIUM/    PLA, PLA_AESTHETIC, PLA_CF, PETG, PETG_PREMIUM, ABS, ASA,
+    OTHER_1/         TPU, and your own materials OTHER_1 … OTHER_4
+```
+
+Silk, matte and other aesthetic PLAs, carbon-fibre PETG and your own materials
+share a filament type with another material, so they go in their material's
+folder. After changing anything, restart the shop: `docker compose restart`
+(or `sudo ./install.sh` → 1).
+
+The folder is the source of truth for what it holds:
+
+- a new or changed file is test-sliced and goes live when it passes (until then,
+  and if it fails, the previous preset stays live);
+- a file you take out puts its slot back on the installed preset;
+- slots it fills are marked *from the profiles folder* in the admin page, which
+  takes no uploads for them. Everything else can still be uploaded there.
+
+A file the shop can't use (two filaments for the same material, a layer height
+it doesn't quote, a preset built on one that isn't there) is listed with the
+reason under Filament → Slicer profiles → Recent uploads, and the container
+log says so too. Presets in the folder turn advanced mode on by themselves.
+
+`PRINT_PROFILES_DIR` in `.env` moves the folder elsewhere (an absolute path);
+the container only ever reads it.
 
 Presets that build on one of OrcaSlicer's own ("inherits") are resolved
 against the presets this OrcaSlicer ships. Presets that build on another of
-your own need to come in the same bundle. For safety, post-processing scripts
-and printer-upload settings in a preset are dropped.
+your own need to come in the same bundle, or both sit in the profiles folder.
+For safety, post-processing scripts and printer-upload settings in a preset are
+dropped.
 
 ## HTTPS options
 
@@ -410,7 +453,8 @@ curl -fsSL https://raw.githubusercontent.com/zappymussel380/print.rish.pw/main/i
 | `PS_BUILD` | `1` builds the image on this server from the checkout instead of downloading it (10–25 minutes) |
 | `PS_BRAND`, `PS_TAGLINE`, `PS_CITY` | Shop name, tagline, city |
 | `PS_QUOTE_PREFIX` | Quotation-number initials, 2–5 letters (default: the shop name's initials) |
-| `PS_PRINTER_SETUP` | `1` a printer from OrcaSlicer's list (default), `2` skip — your own presets, uploaded in the admin dashboard |
+| `PS_PRINTER_SETUP` | `1` a printer from OrcaSlicer's list (default), `2` your own OrcaSlicer presets |
+| `PS_PROFILES_FROM` | With `PS_PRINTER_SETUP=2`: a file or folder of OrcaSlicer exports to sort into the profiles folder. Empty: upload them in the browser after setup |
 | `PS_PRINTER` | Printer: the exact OrcaSlicer preset, e.g. `Prusa MK4 0.4 nozzle` (list: `docker/selfhost/printers.tsv`, 3rd column). With `PS_PRINTER_SETUP=2`, optional: the preset quotes use until you upload yours |
 | `PS_PRINTER_BASE` | With `PS_PRINTER_SETUP=2` and no `PS_PRINTER`, optional: `1` generic Klipper (default), `2` Marlin, `3` RepRapFirmware, `4` Repetier |
 | `PS_PRINTER_NAME` | With `PS_PRINTER_SETUP=2`: the printer name customers see (default "3D printer") |
@@ -441,6 +485,7 @@ curl -fsSL https://raw.githubusercontent.com/zappymussel380/print.rish.pw/main/i
 | `.env` | Web address, admin password hash, API keys and printer choice. Private (`chmod 600`); back it up. |
 | `.selfhost/` | Update state. |
 | `backups/` | Database backups taken before each update. |
+| `profiles/` | Your OrcaSlicer exports, if you use the profiles folder (see [above](#the-profiles-folder)). Read-only to the shop. |
 | `data/` | Everything else: database, Redis, uploads, quotation PDFs, the generated database/session secrets (`secrets/`) and printer profiles. Root-only parts stay root-only (`secrets/`, `postgres/`). Deleting the install folder deletes it too, so back it up with the rest. Installs from before this kept it in the Docker volume `print_data` instead (see below). |
 
 The data folder is `PRINT_DATA_DIR` in `.env`. To keep it somewhere else (a
@@ -531,3 +576,14 @@ the image's OrcaSlicer presets and cleans it the same way. It then writes the
 installed set with the live uploads swapped in to a per-revision directory
 under the slicer work root. The revision is part of every slice cache key, so
 changed presets never reuse old slices.
+
+The profiles folder goes through the same path. When the worker starts it
+reads `/profiles`, places each preset in a slot, and compares every file's
+path, SHA-256 and preset name (`sourceKey`) with the rows from the folder
+(`source = "folder"`). New and changed presets become test batches like
+uploads: the printer and processes in one batch, and each filament in its own
+batch, so one bad file holds up only itself. Slots the folder no longer fills
+are retired. Presets in a folder batch may build on any other preset in the
+folder. A failed folder preset is retried on every start, since what it failed
+on may have been fixed. Files that can't be placed are recorded as failed rows,
+once per version of the file.

@@ -148,6 +148,31 @@ const FILAMENT_FAMILY: Record<MaterialId, { re: RegExp; label: string }> = {
   OTHER_4: { re: /./, label: "filament" },
 };
 
+/** Orca `filament_type`s that name exactly one stock tier, for a filament
+ *  preset nothing else places (the profiles folder without a material
+ *  subfolder). Silk, matte, PETG-CF and the shop's own materials share a type
+ *  with another tier, so they always need their folder. */
+const DEFAULT_MATERIAL_BY_TYPE: Record<string, MaterialId> = {
+  PLA: "PLA",
+  "PLA-CF": "PLA_CF",
+  PETG: "PETG",
+  ABS: "ABS",
+  ASA: "ASA",
+  TPU: "TPU",
+};
+
+export function defaultMaterialFor(flat: OrcaProfile): MaterialId | null {
+  const type = firstValue(flat.filament_type).trim().toUpperCase().replace(/[\s_]+/g, "-");
+  return DEFAULT_MATERIAL_BY_TYPE[type] ?? null;
+}
+
+/** The tier a profiles-folder subfolder names (filament/PETG_PREMIUM/): its id,
+ *  any case, "-" or " " for "_". Null for anything else. */
+export function materialFromFolder(name: string): MaterialId | null {
+  const id = name.trim().toUpperCase().replace(/[\s-]+/g, "_");
+  return (MATERIAL_IDS as readonly string[]).includes(id) ? (id as MaterialId) : null;
+}
+
 const KIND_LABEL: Record<ProfileKind, string> = { machine: "printer", process: "process", filament: "filament" };
 
 /** Why a flattened preset can't fill a slot, or null when it can. */

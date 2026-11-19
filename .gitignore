@@ -9,6 +9,8 @@ dist/
 
 # Runtime data (uploads, PDFs) — never commit
 data/
+# The owner's OrcaSlicer exports (profiles folder)
+/profiles/
 /transfer/
 
 # Customer models and operational backups must never enter version control.

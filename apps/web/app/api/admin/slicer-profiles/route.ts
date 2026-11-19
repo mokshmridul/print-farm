@@ -4,7 +4,7 @@ import { jsonError, readBinaryBody, requireAdminApi } from "@/lib/api-util";
 import { advancedProfilesEnabled } from "@/lib/printer";
 import { assertSameOrigin } from "@/lib/security";
 import { MAX_PROFILE_UPLOAD_BYTES, ProfileUploadRejected, parseProfileUpload } from "@/lib/slicer-profile-upload";
-import { getSlicerProfilesState, queueProfileUpload, revertToInstalled } from "@/lib/slicer-profiles";
+import { folderManagedSlots, getSlicerProfilesState, queueProfileUpload, revertToInstalled } from "@/lib/slicer-profiles";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,6 +25,14 @@ function slotRefused(slot: string | null): NextResponse | null {
     403,
     "SLOT_NOT_OPEN",
     "On this install only your own materials take uploaded presets; the printer and the other materials use the profiles the installer set up.",
+  );
+}
+
+function fromFolder(): NextResponse {
+  return jsonError(
+    409,
+    "FROM_FOLDER",
+    "This comes from the profiles folder on the server. Change or remove the file there and restart the shop.",
   );
 }
 
@@ -63,6 +71,8 @@ export async function POST(request: NextRequest) {
   if (upload.presets.some((p) => slotRefused(p.slot))) {
     return jsonError(422, "BAD_PROFILE", "That file isn't a single filament preset. Export just the filament from OrcaSlicer.");
   }
+  const folder = await folderManagedSlots();
+  if (upload.presets.some((p) => p.slot && folder.has(p.slot))) return fromFolder();
   try {
     await queueProfileUpload(upload, fileName);
   } catch {
@@ -79,6 +89,7 @@ export async function DELETE(request: NextRequest) {
   if (!isProfileSlot(slot)) return jsonError(422, "BAD_SLOT", "Unknown profile slot.");
   const refused = slotRefused(slot);
   if (refused) return refused;
+  if ((await folderManagedSlots()).has(slot)) return fromFolder();
   if (!(await revertToInstalled(slot))) return jsonError(422, "BAD_SLOT", "Unknown profile slot.");
   return NextResponse.json(await getSlicerProfilesState());
 }

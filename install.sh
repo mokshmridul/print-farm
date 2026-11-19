@@ -157,17 +157,18 @@ sec_printer() {
   hint "Every quote is sliced with your printer's own OrcaSlicer profiles, so weight, time and fit match it."
   [ -f "$PRINTERS_FILE" ] || die "Missing $PRINTERS_FILE — the download looks incomplete."
   say "   1) Pick it from OrcaSlicer's list  (recommended — 300+ printers)"
-  say "   2) Skip — I'll upload my own tuned OrcaSlicer presets in the admin dashboard after setup"
+  say "   2) My own tuned OrcaSlicer presets  ${C_DIM}(import the files now, or upload them in the browser after setup)${C_OFF}"
   ask PRINTER_SETUP "Choose 1–2" "$([ "${CFG[PRINTER_ADVANCED]:-0}" = 1 ] && echo 2 || echo 1)" valid_printer_setup "Please answer 1 or 2."
   local machine
   ANS[PRINTER_ADVANCED]=0
   ANS[PRINTER_NAME]=""
+  ANS[PROFILES_FROM]=""
   case "${ANS[PRINTER_SETUP]}" in
     2|advanced)
       ANS[PRINTER_ADVANCED]=1
-      hint "Until you upload, quotes use a generic preset. After setup: admin → Slicer profiles → upload a"
-      hint "printer bundle (OrcaSlicer: File → Export → Export Preset Bundle → Printer bundle)."
-      hint "Every upload is test-sliced before quotes use it."
+      hint "In OrcaSlicer: File → Export → Export Preset Bundle → Printer bundle (.orca_printer), plus any"
+      hint "filament presets (.json). Copy them to this server, or upload them in the browser after setup."
+      hint "Every preset is test-sliced before quotes use it; until then they use a generic preset."
       # No base question: the owner's uploads replace it. Unattended installs
       # can still start from a listed printer (PS_PRINTER) or PS_PRINTER_BASE.
       case "${PS_PRINTER_BASE:-}" in
@@ -182,7 +183,9 @@ sec_printer() {
       # The name lands in customer copy ("a real ___ profile"), so the default
       # has to read well there.
       ask PRINTER_NAME "Printer name customers see (e.g. Voron 2.4 300)" "${CFG[PRINTER_DISPLAY_NAME]:-3D printer}" valid_printer_name \
-        "Use 1–60 letters, numbers, spaces and . _ + / ( ) -" ;;
+        "Use 1–60 letters, numbers, spaces and . _ + / ( ) -"
+      ask PROFILES_FROM "Folder or file with your OrcaSlicer exports (Enter: upload them in the browser later)" "" valid_profiles_source \
+        "That path doesn't exist on this server. Give a folder or file path, or press Enter to skip." ;;
     *) pick_listed_printer; machine=$PICKED_MACHINE ;;
   esac
   ANS[PRINTER_MACHINE]=$machine
@@ -191,7 +194,7 @@ sec_printer() {
     ANS[PRINTER_MULTI]=1
   fi
   if [ "${ANS[PRINTER_ADVANCED]}" = 1 ]; then
-    ok "Printer: ${ANS[PRINTER_NAME]} (your own OrcaSlicer presets — upload them in admin → Slicer profiles)"
+    ok "Printer: ${ANS[PRINTER_NAME]} (your own OrcaSlicer presets)"
   else
     ok "Printer: $(awk -F'\t' -v m="$machine" '$3==m {print $2; exit}' "$PRINTERS_FILE")"
   fi
@@ -530,7 +533,7 @@ summary() {
   say "  Shop:        ${ANS[BRAND]}${ANS[CITY]:+ · ${ANS[CITY]}}  (quotes numbered ${ANS[QUOTE_PREFIX]:-RSP}-$(date +%Y)-0001)"
   say "  Address:     $(site_url)  (${ANS[MODE]})"
   if [ "${ANS[PRINTER_ADVANCED]:-0}" = 1 ]; then
-    say "  Printer:     ${ANS[PRINTER_NAME]} — your own OrcaSlicer presets, uploaded in admin → Slicer profiles$([ "${ANS[PRINTER_MULTI]:-0}" = 1 ] && echo " (automatic multicolour)")"
+    say "  Printer:     ${ANS[PRINTER_NAME]} — your own OrcaSlicer presets$([ -n "${ANS[PROFILES_FROM]:-}" ] && echo ", from ${ANS[PROFILES_FROM]}" || echo ", uploaded in the browser after setup")$([ "${ANS[PRINTER_MULTI]:-0}" = 1 ] && echo " (automatic multicolour)")"
   else
     say "  Printer:     ${ANS[PRINTER_MACHINE]% 0.4 nozzle}$([ "${ANS[PRINTER_MULTI]:-0}" = 1 ] && echo " (automatic multicolour)")"
   fi
@@ -821,7 +824,8 @@ finish() {
   say ""
   say "  Next, in the admin dashboard:"
   if [ "${CFG[PRINTER_ADVANCED]:-0}" = 1 ]; then
-    say "   • Slicer profiles — upload your OrcaSlicer presets (quotes use a generic preset until you do)"
+    say "   • The first admin visit walks you through uploading your OrcaSlicer presets (or check the ones"
+    say "     from the profiles folder under Filament → Slicer profiles)"
   fi
   say "   • Catalog — switch on the colours you actually stock"
   say "   • Rates — your filament costs, so profit estimates are right"
@@ -934,6 +938,7 @@ main() {
          CFG[PRINTER_MACHINE]=${ANS[PRINTER_MACHINE]}; CFG[PRINTER_MULTI_MATERIAL]=${ANS[PRINTER_MULTI]}
          CFG[PRINTER_ADVANCED]=${ANS[PRINTER_ADVANCED]}; CFG[PRINTER_DISPLAY_NAME]=${ANS[PRINTER_NAME]}
          write_env
+         if [ -n "${ANS[PROFILES_FROM]:-}" ]; then import_profiles "${ANS[PROFILES_FROM]}" || true; fi
          # The container generates the new printer's profiles as it starts.
          if ! { dc up -d && wait_healthy 420; }; then
            for k in "${!old[@]}"; do CFG[$k]=${old[$k]}; done
@@ -976,6 +981,7 @@ main() {
 install_from_image() {
   reconcile_data_volume
   fetch_image
+  if [ -n "${ANS[PROFILES_FROM]:-}" ]; then import_profiles "${ANS[PROFILES_FROM]}" || true; fi
   set_admin_password
   start_stack
   seed_shop_settings

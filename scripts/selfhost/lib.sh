@@ -183,7 +183,7 @@ env_value() {
 ENV_LAYOUT=(
   "# --- Install (managed by install.sh / update.sh) ---"
   SELFHOST SELFHOST_STATE SELFHOST_VERSION SELFHOST_BRANCH SELFHOST_MODE SELFHOST_DOMAIN
-  COMPOSE_FILE PRINT_IMAGE_REPO PRINT_IMAGE PRINT_DATA_DIR
+  COMPOSE_FILE PRINT_IMAGE_REPO PRINT_IMAGE PRINT_DATA_DIR PRINT_PROFILES_DIR
   "# --- Network ---"
   APP_ORIGIN PROXY_BIND PROXY_PORT TRUSTED_PROXY_CIDR REAL_IP_HEADER DIRECT_ACCESS PRINT_SUBNET PRINT_GATEWAY
   "# --- App secrets (database and Redis passwords are generated inside the container) ---"
@@ -241,7 +241,7 @@ rand_hex() { openssl rand -hex "${1:-32}"; }
 # directory, exactly as when the owner types `docker compose` there.
 dc() {
   ( cd "$ROOT_DIR" && env -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME -u COMPOSE_PROFILES \
-      -u PRINT_IMAGE -u PRINT_DATA_DIR -u APP_ORIGIN -u ADMIN_PASSWORD -u ADMIN_PASSWORD_HASH -u SESSION_SECRET \
+      -u PRINT_IMAGE -u PRINT_DATA_DIR -u PRINT_PROFILES_DIR -u APP_ORIGIN -u ADMIN_PASSWORD -u ADMIN_PASSWORD_HASH -u SESSION_SECRET \
       docker compose "$@" )
 }
 
@@ -286,6 +286,44 @@ data_location() {
 }
 
 dir_has_files() { [ -d "$1" ] && [ -n "$(ls -A "$1" 2>/dev/null)" ]; }
+
+# ── The profiles folder ───────────────────────────────────────────────────────
+# OrcaSlicer exports the shop slices with, in printer/ process/ filament/; the
+# container picks them up as it starts (docs/SELF-HOSTING.md).
+profiles_dir() { printf '%s' "${CFG[PRINT_PROFILES_DIR]:-$ROOT_DIR/profiles}"; }
+
+valid_profiles_source() { [ -z "$1" ] || [ -e "$1" ]; }
+
+# import_profiles SOURCE — sort the OrcaSlicer exports at SOURCE (one file or a
+# folder of them) into the profiles folder, byte for byte. Runs the image's
+# sorter with no network and only the access it needs; CFG[PRINT_IMAGE] must be
+# present locally. Returns 1 when nothing usable was found.
+import_profiles() {
+  local src dest out line kind a b placed=0
+  src=$(readlink -f -- "$1") || { err "Can't find $1."; return 1; }
+  dest=$(profiles_dir)
+  mkdir -p "$dest" && chmod 0755 "$dest"
+  local -a mount
+  if [ -d "$src" ]; then mount=(-v "$src:/in:ro"); else mount=(-v "$src:/in/$(basename "$src"):ro"); fi
+  head_line "Your OrcaSlicer presets"
+  out=$(docker run --rm --network none --read-only --cap-drop ALL --cap-add DAC_READ_SEARCH \
+    --security-opt no-new-privileges "${mount[@]}" -v "$dest:/out" \
+    --entrypoint node "${CFG[PRINT_IMAGE]}" /opt/tools/sort-profiles.mjs /in /out 2>&1) || true
+  while IFS=$'\t' read -r kind a b; do
+    case "$kind" in
+      placed) ok "$a"; placed=$((placed + 1)) ;;
+      replaced) say "  Replaced the earlier $a" ;;
+      skipped) warn "Not used: $a — $b" ;;
+      "") ;;
+      *) say "  $kind${a:+ $a}${b:+ $b}" ;;
+    esac
+  done <<< "$out"
+  if [ "$placed" = 0 ]; then
+    warn "No OrcaSlicer presets found in $1."
+    return 1
+  fi
+  say "  In $dest — the shop test-slices them when it starts; admin → Filament → Slicer profiles shows the result."
+}
 
 # PRINT_DATA_DIR newly set while the data is still in the named volume: copy it
 # into the directory once, with the container stopped so PostgreSQL's files are

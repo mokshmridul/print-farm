@@ -73,6 +73,9 @@ export const config = {
   slicerVersion: str("ORCA_VERSION", "2.5.1"),
   /** OrcaSlicer's bundled presets — what an uploaded preset's `inherits` names. */
   orcaProfilesRoot: str("ORCA_PROFILES_ROOT", "/opt/orca-profiles"),
+  /** The owner's OrcaSlicer exports (printer/, process/, filament/), synced
+   *  into the live presets when the worker starts. Missing: nothing to sync. */
+  profilesFolder: str("PROFILES_FOLDER", "/profiles"),
   /** Advanced mode (self-host installer): the owner uploads their own presets
    *  in the admin dashboard, and slices use them once a test slice passes. */
   advancedProfiles: process.env.ADVANCED_PROFILES === "1",

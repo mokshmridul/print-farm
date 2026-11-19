@@ -272,7 +272,12 @@ export function CustomMaterialsEditor({
                   </p>
                 ) : null}
 
-                {savedName ? (
+                {savedName && slot?.fromFolder ? (
+                  <p className="text-xs text-faint">
+                    This profile comes from the profiles folder on the server (filament/{id}/). Change or remove the
+                    file there and restart the shop to update it.
+                  </p>
+                ) : savedName ? (
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <select
                       aria-label={`${savedName}: OrcaSlicer generic to start from`}

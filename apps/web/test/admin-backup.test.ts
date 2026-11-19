@@ -14,7 +14,7 @@ const apiUtil = vi.hoisted(() => ({
   jsonError: (status: number, code: string, message: string) => Response.json({ error: { code, message } }, { status }),
   readJsonBody: vi.fn(),
 }));
-const profiles = vi.hoisted(() => ({ queueProfileUpload: vi.fn(), advanced: false }));
+const profiles = vi.hoisted(() => ({ queueProfileUpload: vi.fn(), advanced: false, folder: new Set<string>() }));
 
 vi.mock("@print/db", () => ({
   prisma: {
@@ -37,7 +37,10 @@ vi.mock("@print/db", () => ({
 vi.mock("@/lib/api-util", () => apiUtil);
 vi.mock("@/lib/security", () => ({ assertSameOrigin: () => true }));
 vi.mock("@/lib/redis", () => ({ redis: { get: vi.fn(), set: vi.fn() } }));
-vi.mock("@/lib/slicer-profiles", () => ({ queueProfileUpload: profiles.queueProfileUpload }));
+vi.mock("@/lib/slicer-profiles", () => ({
+  queueProfileUpload: profiles.queueProfileUpload,
+  folderManagedSlots: async () => profiles.folder,
+}));
 vi.mock("@/lib/printer", () => ({ advancedProfilesEnabled: () => profiles.advanced }));
 
 const route = await import("@/app/api/admin/backup/route");
@@ -244,5 +247,12 @@ describe("restore", () => {
     profiles.advanced = true;
     const advanced = await restore({ ...backup, sections: {}, presets: [processPreset] });
     expect(advanced.json.presetsQueued).toBe(1);
+
+    // Unless the profiles folder on this server fills that slot: it stays the source.
+    profiles.folder = new Set(["process:200"]);
+    const fromFolder = await restore({ ...backup, sections: {}, presets: [processPreset] });
+    expect(fromFolder.json.presetsQueued).toBe(0);
+    expect(fromFolder.json.skipped).toEqual([{ what: 'Preset "Fast 0.2"', why: "this slot comes from the profiles folder on the server" }]);
+    profiles.folder = new Set();
   });
 });
