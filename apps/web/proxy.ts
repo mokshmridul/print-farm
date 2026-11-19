@@ -5,6 +5,7 @@ import {
   ADMIN_AUDIENCE,
   TOKEN_ISSUER,
   adminCookieName,
+  isSecureRequest,
 } from "@print/shared/session-constants";
 
 /** Edge proxy (`middleware.ts` before Next 16): applies the
@@ -29,7 +30,7 @@ async function isAdminToken(token: string | undefined): Promise<boolean> {
   }
 }
 
-function contentSecurityPolicy(nonce: string): string {
+function contentSecurityPolicy(nonce: string, secure: boolean): string {
   // Google Maps (optional) is the only permitted external frame.
   const mapsConfigured = !!process.env.GOOGLE_MAPS_EMBED_URL;
   const frameSrc = mapsConfigured ? "https://www.google.com" : "'none'";
@@ -51,7 +52,9 @@ function contentSecurityPolicy(nonce: string): string {
     "base-uri 'self'",
     "form-action 'self'",
     "object-src 'none'",
-    ...(process.env.APP_ORIGIN?.startsWith("https://") ? ["upgrade-insecure-requests"] : []),
+    // Only on an HTTPS visit: on a plain-HTTP LAN visit it would send every
+    // asset to https:// on an address that doesn't serve it.
+    ...(secure ? ["upgrade-insecure-requests"] : []),
   ].join("; ");
 }
 
@@ -59,16 +62,22 @@ function withSecurityHeaders(
   response: NextResponse,
   nonce: string,
   pathname: string,
+  secure: boolean,
 ): NextResponse {
-  response.headers.set("Content-Security-Policy", contentSecurityPolicy(nonce));
+  response.headers.set("Content-Security-Policy", contentSecurityPolicy(nonce, secure));
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   // Browsers ignore COOP on a plain-http origin other than localhost (the
-  // installer's home-network test mode) and log an error on every page for it.
-  if (!/^http:\/\/(?!(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$)/.test(process.env.APP_ORIGIN ?? "")) {
+  // installer's home-network test mode, or a LAN visit to an HTTPS shop) and
+  // log an error on every page for it.
+  const appOrigin = process.env.APP_ORIGIN ?? "";
+  const coop = appOrigin.startsWith("https://")
+    ? secure
+    : !/^http:\/\/(?!(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$)/.test(appOrigin);
+  if (coop) {
     response.headers.set("Cross-Origin-Opener-Policy", "same-origin");
   }
-  if (process.env.APP_ORIGIN?.startsWith("https://")) {
+  if (secure) {
     response.headers.set("Strict-Transport-Security", "max-age=31536000");
   }
   if (
@@ -87,6 +96,7 @@ function withSecurityHeaders(
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const nonce = crypto.randomUUID().replace(/-/g, "");
+  const secure = isSecureRequest(process.env.APP_ORIGIN, request.headers.get("x-direct-visit"));
 
   // --- admin gate ---
   const isAdminPath = pathname.startsWith("/admin") || pathname.startsWith("/api/admin");
@@ -94,7 +104,7 @@ export async function proxy(request: NextRequest) {
 
   if (isAdminPath && !isLogin) {
     const authed = await isAdminToken(
-      request.cookies.get(adminCookieName(!!process.env.APP_ORIGIN?.startsWith("https://")))?.value,
+      request.cookies.get(adminCookieName(secure))?.value,
     );
     if (!authed) {
       if (pathname.startsWith("/api/admin")) {
@@ -105,17 +115,18 @@ export async function proxy(request: NextRequest) {
           ),
           nonce,
           pathname,
+          secure,
         );
       }
       const url = request.nextUrl.clone();
       url.pathname = "/admin/login";
       url.search = pathname !== "/admin" ? `?next=${encodeURIComponent(pathname)}` : "";
-      return withSecurityHeaders(NextResponse.redirect(url), nonce, pathname);
+      return withSecurityHeaders(NextResponse.redirect(url), nonce, pathname, secure);
     }
   }
 
   const requestHeaders = new Headers(request.headers);
-  const csp = contentSecurityPolicy(nonce);
+  const csp = contentSecurityPolicy(nonce, secure);
   // Next extracts the nonce from the request CSP and applies it to framework
   // scripts. x-nonce is for the explicit theme bootstrap in the root layout.
   requestHeaders.set("Content-Security-Policy", csp);
@@ -124,6 +135,7 @@ export async function proxy(request: NextRequest) {
     NextResponse.next({ request: { headers: requestHeaders } }),
     nonce,
     pathname,
+    secure,
   );
 }
 

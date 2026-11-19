@@ -235,8 +235,10 @@ For both, the installer asks where the proxy or cloudflared runs:
   only that one — to tell the shop each visitor's real address.
 - **In Docker, or on another computer:** the shop listens on an address of
   this server you choose (never `0.0.0.0`), and you give the **one** IP the
-  proxy connects from. Any other machine connecting gets 403. Docker containers
-  can't reach the host's `127.0.0.1`.
+  proxy connects from. Any other machine connecting gets 403, unless you also
+  allow direct access from your network (`DIRECT_ACCESS=1`): then other devices
+  can open `http://<address>:<port>` too, each as itself, over plain http.
+  Docker containers can't reach the host's `127.0.0.1`.
 
 The real visitor address matters: rate limits are per visitor, so without it
 every customer would share one.
@@ -420,6 +422,7 @@ curl -fsSL https://raw.githubusercontent.com/zappymussel380/print.rish.pw/main/i
 | `PS_LOCAL_ADDRESS` | With `PS_LOCAL_ACCESS=network`, optional: which of this computer's private addresses to use (default: the one its default route uses) |
 | `PS_FORWARDER_ACCESS` | Modes 2 and 3: `host` (proxy/cloudflared installed on this server, default) or `other` (in Docker or on another computer) |
 | `PS_PROXY_BIND`, `PS_PROXY_IP` | With `PS_FORWARDER_ACCESS=other`: the address of this server to listen on, and the one IP the proxy connects from |
+| `PS_CONFIRM_DIRECT_ACCESS` | With `PS_FORWARDER_ACCESS=other`: `yes` also lets other devices on your network open the shop directly at that address over plain http (default `no`: only the proxy is served) |
 | `PS_ADMIN_PASSWORD` | Admin password (12–72 characters) |
 | `PS_MATERIALS` | Materials offered, by number: 1 PLA, 2 Aesthetic PLA, 3 PLA-CF, 4 PETG, 5 PETG Premium, 6 ABS, 7 ASA, 8 TPU |
 | `PS_SETUP_FEE`, `PS_RATE_<ID>` | Setup fee and per-gram rate in ₹, e.g. `PS_RATE_PLA_CF=3.5` |
@@ -458,7 +461,8 @@ docker compose exec print-farm print-farm --help    # maintenance commands
   on the server (or your port) tells you whether the shop itself is up.
 - **Every request gets 403.** Only the one trusted forwarder may connect
   (`TRUSTED_PROXY_CIDR` in `.env`). If your proxy moved, run `sudo ./install.sh`
-  → option 2 again.
+  → option 2 again. To open the shop from other devices on your network as
+  well, answer yes to direct access there (or set `DIRECT_ACCESS=1`).
 - **The container keeps restarting.** A startup step failed:
   `docker compose logs --tail 80` shows which. A bad `PRINTER_MACHINE` (not an
   exact OrcaSlicer preset name) is the usual one.

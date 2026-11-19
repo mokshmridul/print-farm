@@ -33,9 +33,12 @@ services:
       APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
       # One host that may assert the client address (your proxy as seen from
       # inside the container). Empty: trust none, serve every peer. Set: every
-      # other peer gets 403. REAL_IP_HEADER: X-Real-IP or CF-Connecting-IP.
+      # other peer gets 403, unless DIRECT_ACCESS=1 (then every other peer is
+      # served as itself, e.g. LAN devices beside a tunnel).
+      # REAL_IP_HEADER: X-Real-IP or CF-Connecting-IP.
       TRUSTED_PROXY_CIDR: ${TRUSTED_PROXY_CIDR:-}
       REAL_IP_HEADER: ${REAL_IP_HEADER:-X-Real-IP}
+      DIRECT_ACCESS: ${DIRECT_ACCESS:-0}
       # Admin login. Empty everywhere: a password is generated on first boot and
       # printed once in `docker compose logs`. ADMIN_PASSWORD is hashed on first
       # boot only; change it later with `docker compose exec print-farm print-farm admin-password`.

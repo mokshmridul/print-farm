@@ -261,6 +261,7 @@ sec_address() {
   case "${CFG[SELFHOST_MODE]:-}" in proxy) current=2 ;; tunnel|owntunnel) current=3 ;; esac
   ask MODE_CHOICE "Choose 1–3" "$current" valid_mode_choice "Please answer 1, 2 or 3."
   ANS[TRUSTED_PROXY]=""
+  ANS[DIRECT_ACCESS]=0
   ANS[REAL_IP_HEADER]=X-Real-IP
   case "${ANS[MODE_CHOICE]}" in
     1|local)
@@ -314,12 +315,24 @@ sec_forwarder_access() {
       [ "${CFG[TRUSTED_PROXY_CIDR]:-}" != "${CFG[PRINT_GATEWAY]:-x}" ] && stored=${CFG[TRUSTED_PROXY_CIDR]:-}
       hint "The shop only believes the visitor address from this one machine; everything else is refused."
       ask PROXY_IP "IP address $what connects FROM (exactly one host)" "$stored" valid_ipv4 "Enter one IPv4 address, like 192.168.1.20."
-      ANS[TRUSTED_PROXY]=${ANS[PROXY_IP]} ;;
+      ANS[TRUSTED_PROXY]=${ANS[PROXY_IP]}
+      # Devices on the same network can reach that address too; refused unless asked for.
+      local direct_default=N
+      [ "${CFG[DIRECT_ACCESS]:-0}" = 1 ] && direct_default=Y
+      say "  Other devices on your network can reach ${ANS[PROXY_BIND]} too. Let them open the shop there"
+      say "  directly (plain http), as well as through $what?"
+      if confirm "  Allow direct access from your network?" "$direct_default" DIRECT_ACCESS; then
+        ANS[DIRECT_ACCESS]=1
+        hint "Plain http on your network: the admin password travels unencrypted there. Use a network you trust."
+      else
+        ANS[DIRECT_ACCESS]=0
+      fi ;;
     *)
       ANS[PROXY_BIND]=127.0.0.1
       # Docker relays a loopback connection from its network gateway, which
       # configure_env pins and trusts.
-      ANS[TRUSTED_PROXY]=gateway ;;
+      ANS[TRUSTED_PROXY]=gateway
+      ANS[DIRECT_ACCESS]=0 ;;
   esac
 }
 valid_forwarder_access() { [[ "$1" =~ ^(1|2|host|other)$ ]]; }
@@ -574,6 +587,7 @@ configure_env() {
   CFG[PROXY_BIND]=${ANS[PROXY_BIND]}
   CFG[PROXY_PORT]=${ANS[PROXY_PORT]}
   CFG[REAL_IP_HEADER]=${ANS[REAL_IP_HEADER]:-X-Real-IP}
+  CFG[DIRECT_ACCESS]=${ANS[DIRECT_ACCESS]:-0}
   case "${ANS[TRUSTED_PROXY]:-}" in
     "") CFG[TRUSTED_PROXY_CIDR]="" ;;
     gateway) CFG[TRUSTED_PROXY_CIDR]=${CFG[PRINT_GATEWAY]} ;;

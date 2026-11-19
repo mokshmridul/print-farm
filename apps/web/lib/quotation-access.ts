@@ -1,5 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
+import { isSecureRequest } from "@print/shared";
 import type { NextResponse } from "next/server";
 import { env } from "./env";
 
@@ -49,16 +50,22 @@ export function quotationAccessMatches(
   return syntacticallyValid && storedValid && expiresAt.getTime() > now.getTime() && equal;
 }
 
-function cookieName(number: string): string {
-  const safeNumber = number.replace(/[^A-Za-z0-9_-]/g, "_");
-  return `${env.appOrigin.startsWith("https://") ? "__Host-" : ""}quotation_${safeNumber}`;
+/** HTTPS-ness of a request (see isSecureRequest): the cookie is Secure and
+ * __Host- prefixed only on an HTTPS visit. */
+function secureFor(requestHeaders: Headers): boolean {
+  return isSecureRequest(env.appOrigin, requestHeaders.get("x-direct-visit"));
 }
 
-function cookieOptions(expiresAt: Date) {
+function cookieName(number: string, secure: boolean): string {
+  const safeNumber = number.replace(/[^A-Za-z0-9_-]/g, "_");
+  return `${secure ? "__Host-" : ""}quotation_${safeNumber}`;
+}
+
+function cookieOptions(expiresAt: Date, secure: boolean) {
   return {
     httpOnly: true,
     sameSite: "strict" as const,
-    secure: env.appOrigin.startsWith("https://"),
+    secure,
     path: "/",
     expires: expiresAt,
     priority: "high" as const,
@@ -66,14 +73,16 @@ function cookieOptions(expiresAt: Date) {
 }
 
 export function setQuotationAccessCookie(
+  request: Request,
   response: NextResponse,
   number: string,
   token: string,
   expiresAt: Date,
 ): void {
-  response.cookies.set(cookieName(number), token, cookieOptions(expiresAt));
+  const secure = secureFor(request.headers);
+  response.cookies.set(cookieName(number, secure), token, cookieOptions(expiresAt, secure));
 }
 
 export async function getQuotationAccessCookie(number: string): Promise<string> {
-  return (await cookies()).get(cookieName(number))?.value ?? "";
+  return (await cookies()).get(cookieName(number, secureFor(await headers())))?.value ?? "";
 }

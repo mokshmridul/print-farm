@@ -51,6 +51,6 @@ export async function POST(
 
   const response = NextResponse.json({ ok: true });
   response.headers.set("Cache-Control", "no-store");
-  setQuotationAccessCookie(response, number, token as string, quotation.accessTokenExpiresAt);
+  setQuotationAccessCookie(request, response, number, token as string, quotation.accessTokenExpiresAt);
   return response;
 }

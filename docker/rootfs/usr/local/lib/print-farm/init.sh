@@ -122,6 +122,7 @@ chmod 0600 "$RUN_DIR/redis.conf"
 
 # ── nginx ─────────────────────────────────────────────────────────────────────
 TRUSTED_PROXY_CIDR=$(cenv TRUSTED_PROXY_CIDR) REAL_IP_HEADER=$(cenv REAL_IP_HEADER X-Real-IP) \
+  DIRECT_ACCESS=$(cenv DIRECT_ACCESS 0) \
   "$LIB_DIR/render-nginx.sh" "$LIB_DIR/nginx-site.conf.template" /run/nginx/site.conf
 chown root:www-data /run/nginx/site.conf
 chmod 0640 /run/nginx/site.conf
