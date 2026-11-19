@@ -1,12 +1,11 @@
 import { prisma } from "@print/db";
-import { advancedProfilesEnabled } from "./printer";
 
 /**
- * The guided setup (admin → /admin/setup): the owner's OrcaSlicer printer,
- * process and filament presets, uploaded one step at a time through the same
- * test-sliced upload as the Slicer profiles section. Offered once, on the first
- * admin visit of an advanced-mode shop that has no presets of its own yet —
- * neither uploaded nor in the profiles folder — and always reachable from
+ * The guided setup (admin → /admin/setup): a short first-run tour that has the
+ * owner upload their OrcaSlicer printer, process and filament presets (each
+ * through the same test-sliced upload as the Slicer profiles section), then
+ * enter the shop's details. Offered once, on the first admin visit of a new
+ * shop — one that has never taken a quotation — and always reachable from
  * Slicer profiles.
  */
 
@@ -19,9 +18,9 @@ export async function setupWizardDone(): Promise<boolean> {
 
 /** Whether the dashboard should open the guided setup instead. */
 export async function shouldOfferSetup(): Promise<boolean> {
-  if (!advancedProfilesEnabled()) return false;
   if (await setupWizardDone()) return false;
-  return (await prisma.slicerProfileUpload.count()) === 0;
+  // A shop already in business has set itself up some other way.
+  return (await prisma.quotation.findFirst({ select: { id: true } })) === null;
 }
 
 export async function markSetupDone(): Promise<void> {

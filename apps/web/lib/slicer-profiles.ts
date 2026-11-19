@@ -4,6 +4,7 @@ import {
   PROFILE_SLOTS,
   filamentPresetFacts,
   isProfileSlot,
+  printerReady,
   materialName,
   slicerProfileJobId,
   slotInScope,
@@ -55,7 +56,14 @@ export interface SlicerProfileUploadState {
 }
 
 export interface SlicerProfilesState {
-  printer: { name: string; machine: string; bedMm: [number, number, number]; nozzleMm: number };
+  printer: {
+    name: string;
+    machine: string;
+    bedMm: [number, number, number];
+    nozzleMm: number;
+    /** A real printer to quote with — not the generic stand-in (printerReady). */
+    ready: boolean;
+  };
   slots: SlicerProfileSlotState[];
   uploads: SlicerProfileUploadState[];
   busy: boolean;
@@ -171,7 +179,13 @@ export async function getSlicerProfilesState(): Promise<SlicerProfilesState> {
   });
 
   return {
-    printer: { name: getPrinterSpec().name, machine: printer.machine, bedMm: printer.bedMm, nozzleMm: printer.nozzleMm },
+    printer: {
+      name: getPrinterSpec().name,
+      machine: printer.machine,
+      bedMm: printer.bedMm,
+      nozzleMm: printer.nozzleMm,
+      ready: printerReady(printer),
+    },
     slots,
     uploads,
     busy: uploads.some((u) => u.status === "testing"),

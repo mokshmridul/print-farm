@@ -48,7 +48,7 @@ export function SiteFooter({ note, city, brandName }: { note: string; city: stri
         </nav>
         <p>
           <FooterNote note={note || brandName} />
-          {city ? ` · ${city}, India` : " · India"}
+          {city ? ` · ${city}, India` : null}
         </p>
       </div>
     </footer>

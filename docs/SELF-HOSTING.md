@@ -167,6 +167,30 @@ removing its profile takes it off sale by itself. Quotations keep the name a
 material had when they were submitted, so renaming one later doesn't change
 old quotations.
 
+## The first-run tour
+
+The first time a new shop's admin dashboard opens (before it has taken any
+quotation), it starts a short tour at `/admin/setup`:
+
+1. **Printer.** Drop your OrcaSlicer printer bundle (`.orca_printer`) or
+   printer preset (`.json`) onto the page; it uploads and starts its test
+   slice straight away. In own-presets mode this step comes first and can't be
+   skipped past, because the shop can't quote without a printer. A printer
+   picked from OrcaSlicer's list at install time skips this step and the next.
+2. **Process presets.** Your 0.12, 0.16 and 0.20 mm presets, if the printer
+   bundle didn't bring them. Each file's layer height is suggested for you to
+   confirm.
+3. **Filaments.** Drop your filament presets; each is matched to a material
+   from its filament type for you to confirm. Optional: anything you skip
+   uses the printer's stock preset.
+4. **Shop details.** Shop name (required), city, quotation initials (worked
+   out from the name), WhatsApp, contact email, phone and address. The same
+   fields as admin → Site, where you can change them, and the accent colour,
+   later.
+
+*Skip setup — I'll do this later* ends the tour; the dashboard keeps showing
+"Not taking quotes yet" until a printer is set up.
+
 ## Your own printer or profiles (advanced mode)
 
 Is your printer missing from OrcaSlicer's list (a Voron, a modded Ender, a
@@ -177,10 +201,9 @@ can use both:
 
 - **Guided, in the browser.** At the installer's printer question choose
   **2) My own tuned OrcaSlicer presets** and press Enter at the file question.
-  The first time you open the admin dashboard, a setup page walks you through
-  it: your printer, then process presets, then filaments. It suggests where each
-  file goes (from its layer height or filament type) and you confirm. You can
-  open it again any time from Filament → Slicer profiles → *Guided setup*.
+  The first time you open the admin dashboard, a short setup tour walks you
+  through it (see [The first-run tour](#the-first-run-tour)). You can open it
+  again any time from Filament → Slicer profiles → *Guided setup*.
 - **A folder on the server.** Put the files in the install folder's
   `profiles/` folder (or answer the installer's file question with a file or
   folder of exports, and it sorts them in for you). The shop picks them up
