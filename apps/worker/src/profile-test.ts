@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { prisma, type Prisma } from "@print/db";
 import {
   LAYER_HEIGHTS_UM,
   bedOf,
+  cleanProfile,
   firstValue,
   isProfileSlot,
   plateFor,
@@ -12,6 +13,7 @@ import {
   slotKind,
   slotLayerUm,
   slotMaterial,
+  slotFileName,
   slotMismatch,
   slotInScope,
   type LayerHeightUm,
@@ -123,14 +125,15 @@ export interface TestSlice {
   ids: string[];
 }
 
-/** The slices that prove a batch: the printer at 0.20 mm in PLA, each process
- *  at its height in PLA, each filament at 0.20 mm — one slice per combination. */
-export function testSlicesFor(live: readonly PlannedUpload[]): TestSlice[] {
+/** The slices that prove a batch: the printer at 0.20 mm and each process at
+ *  its height, in `filament` (one of the owner's, or the test-only reference),
+ *  and each filament at 0.20 mm — one slice per combination. */
+export function testSlicesFor(live: readonly PlannedUpload[], filament: MaterialId = "PLA"): TestSlice[] {
   const tests = new Map<string, TestSlice>();
   for (const upload of live) {
     if (!upload.slot) continue;
     const um: LayerHeightUm = slotLayerUm(upload.slot) ?? 200;
-    const material: MaterialId = slotMaterial(upload.slot) ?? "PLA";
+    const material: MaterialId = slotMaterial(upload.slot) ?? filament;
     const key = `${um}:${material}`;
     const test = tests.get(key) ?? {
       settings: { material, layerHeightUm: um, infillPct: 15, supports: "off" },
@@ -166,12 +169,17 @@ export function cubeStl(size = 20): Buffer {
   return out;
 }
 
+/** OrcaSlicer's universal PLA, used only to test-slice a printer or process
+ *  preset when the owner has no filament live yet. Written into the throwaway
+ *  test set alone: it is never sold, quoted or sliced with for a customer. */
+export const REFERENCE_FILAMENT = "Generic PLA @System";
+
 export interface ProfileBatchDeps {
   index: () => Flattener;
   slice?: typeof runSlice;
-  /** Advanced mode: every slot may be uploaded. Otherwise only the shop's own
-   *  materials' filament slots (slotInScope) — its printer and stock materials
-   *  keep the profiles the installer generated. */
+  /** Advanced mode: every slot may be uploaded. Otherwise only filament slots
+   *  (slotInScope) — the printer and its processes keep the profiles generated
+   *  for the printer picked from OrcaSlicer's list. */
   advanced: boolean;
   /** The profiles folder's presets, as parents for a batch from it. */
   folderPeers?: () => Promise<OrcaProfile[]>;
@@ -221,6 +229,16 @@ async function runTestSlices(batchId: string, tests: readonly TestSlice[], set: 
   return grams;
 }
 
+/** Put the reference filament in a test set as `material`'s preset. */
+async function writeReferenceFilament(set: ProfileSet, index: Flattener, material: MaterialId): Promise<void> {
+  const machine = JSON.parse(await readFile(join(set.dir, set.machineFile), "utf8")) as OrcaProfile;
+  const machineName = String(machine.name ?? set.spec.machine);
+  const flat = index.flattenPreset("filament", { name: "Reference PLA (test only)", inherits: REFERENCE_FILAMENT }, []);
+  const file = join(set.dir, slotFileName(`filament:${material}`, set.machineFile));
+  await writeFile(file, JSON.stringify(cleanProfile(flat, "filament", "Reference PLA (test only)", machineName)), { mode: 0o644 });
+  await chmod(file, 0o644);
+}
+
 export async function markBatchFailed(batchId: string, message: string): Promise<void> {
   await prisma.slicerProfileUpload.updateMany({
     where: { batchId, status: { in: ["PENDING", "TESTING"] } },
@@ -252,7 +270,7 @@ export async function processProfileBatch(batchId: string, deps: ProfileBatchDep
     const outOfScope = live.find((p) => !slotInScope(p.slot, deps.advanced));
     if (outOfScope) {
       throw new ProfileBatchError(
-        "Only your own materials' filament presets can be uploaded on this install. Your printer and the other materials use the profiles the installer set up (advanced mode changes that).",
+        "Only filament presets can be uploaded on this install. Your printer and its processes use the profiles made for the printer picked when installing (advanced mode changes that).",
       );
     }
     const active = await prisma.slicerProfileUpload.findMany({
@@ -284,9 +302,17 @@ export async function processProfileBatch(batchId: string, deps: ProfileBatchDep
     const dir = join(profileSetsRoot(), `test-${batchId}`);
     await rm(dir, { recursive: true, force: true });
     const set = await materialiseProfileSet(candidate, dir);
+    // Printer and process presets are proved with one of the owner's live
+    // filaments; with none yet, with the test-only reference filament.
+    const owned = candidate.flatMap((c) => slotMaterial(c.slot) ?? []);
+    const filament: MaterialId = owned.includes("PLA") ? "PLA" : (owned[0] ?? "PLA");
+    const tests = testSlicesFor(live, filament);
     let grams: Map<string, number>;
     try {
-      grams = await runTestSlices(batchId, testSlicesFor(live), set, deps.slice ?? runSlice);
+      if (!owned.includes(filament) && tests.some((t) => t.settings.material === filament)) {
+        await writeReferenceFilament(set, deps.index(), filament);
+      }
+      grams = await runTestSlices(batchId, tests, set, deps.slice ?? runSlice);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

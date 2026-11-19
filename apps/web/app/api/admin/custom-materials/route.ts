@@ -8,7 +8,7 @@ import {
 } from "@print/shared";
 import { jsonError, readJsonBody, requireAdminApi } from "@/lib/api-util";
 import { assertSameOrigin } from "@/lib/security";
-import { getReadyCustomMaterials, saveCustomMaterials } from "@/lib/catalog-availability";
+import { getReadyMaterials, saveCustomMaterials } from "@/lib/catalog-availability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,5 +44,5 @@ export async function PUT(request: NextRequest) {
       `${which}: use 1–${CUSTOM_MATERIAL_NAME_MAX} letters, numbers, spaces and . , + - / ( ) % &, starting with a letter or number.`,
     );
   }
-  return NextResponse.json(toPublicCatalog(saved, await getReadyCustomMaterials()));
+  return NextResponse.json(toPublicCatalog(saved, await getReadyMaterials()));
 }

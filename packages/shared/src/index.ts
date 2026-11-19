@@ -44,3 +44,4 @@ export * from "./shipping-settings-schema";
 export * from "./slice-job";
 export * from "./uuid";
 export * from "./whatsapp";
+export * from "./filament-matrix";

@@ -120,6 +120,9 @@ describe("applyActiveProfiles", () => {
     expect(printerReady(applyActiveProfiles(standIn, [uploads[1]!]))).toBe(false);
     expect(printerReady(applyActiveProfiles(standIn, uploads))).toBe(true);
     expect(printerReady(BASE)).toBe(true);
+    // The owner's printer names a stand-in, not one the shop named for customers.
+    expect(applyActiveProfiles({ ...standIn, name: "3D printer" }, uploads).name).toBe("Voron 2.4 300");
+    expect(applyActiveProfiles({ ...standIn, name: "Big Voron" }, uploads).name).toBe("Big Voron");
   });
 
   it("derives the same revision whatever order the rows come in", () => {

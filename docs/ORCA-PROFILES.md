@@ -42,10 +42,13 @@ shop's profiles come from one of two places:
   - `machine.json`: the printer's machine preset;
   - `process.0.12.json` / `.0.16.json` / `.0.20.json`: its process presets
     (a missing height is derived from its closest one);
-  - `filament.<tier>.json`: one per material tier, the printer vendor's own
-    "Generic" preset where it has one, otherwise OrcaSlicer's library;
-  - `printer.json`: the printer's description (name, build volume, plate per
-    tier) that the worker and website read.
+  - `printer.json`: the printer's description (name, build volume) that the
+    worker and website read.
+
+  There are **no filament presets** in it: no material has a built-in one.
+  Each is sold only once the owner's own filament preset for it is live
+  (`materialProblem` in `packages/shared/src/catalog-availability.ts`), and
+  the worker refuses a customer slice for a material without one.
 - **The owner's own OrcaSlicer presets** (advanced mode: guided setup, admin →
   Slicer profiles, or the profiles folder). They are swapped into a set
   generated from OrcaSlicer's generic Klipper (or Marlin / RRF / Repetier)
@@ -57,8 +60,14 @@ that placeholder: customers see "not taking quotes yet", and upload, slice and
 checkout answer `503 SHOP_NOT_READY` until a printer preset passes its test
 slice.
 
-Each material tier maps to one filament profile (`filamentProfile` in
-`apps/worker/src/config.ts`).
+Each material tier maps to one filament profile file (`filamentProfile` in
+`apps/worker/src/config.ts`), written from the owner's live upload.
+
+OrcaSlicer's bundled presets (`/opt/orca-profiles`) are reference data only:
+uploads name one as their parent, and a printer or process upload with no
+filament of the owner's live yet is test-sliced with OrcaSlicer's `Generic PLA
+@System` (`REFERENCE_FILAMENT` in `apps/worker/src/profile-test.ts`), written
+only into the throwaway test set.
 
 **Grams — and therefore price — scale with `filament_density ×
 filament_flow_ratio`** of the filament preset, not density alone. The

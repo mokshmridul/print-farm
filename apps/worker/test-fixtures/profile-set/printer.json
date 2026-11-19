@@ -1,42 +1,15 @@
 {
-  "id": "prusa-mk4-0-4-nozzle",
-  "machine": "Prusa MK4 0.4 nozzle",
-  "name": "Prusa MK4",
-  "vendor": "Prusa",
+  "id": "test-printer-0-4-nozzle",
+  "machine": "Test Printer 0.4 nozzle",
+  "name": "Test Printer",
+  "vendor": "Test",
   "nozzleMm": 0.4,
   "bedMm": [
-    250,
-    210,
-    220
+    220,
+    220,
+    250
   ],
   "multiMaterial": false,
-  "plates": {
-    "PLA": "High Temp Plate",
-    "PLA_AESTHETIC": "Textured PEI Plate",
-    "PLA_CF": "High Temp Plate",
-    "PETG": "High Temp Plate",
-    "PETG_PREMIUM": "Textured PEI Plate",
-    "ABS": "High Temp Plate",
-    "ASA": "High Temp Plate",
-    "TPU": "High Temp Plate",
-    "OTHER_1": "High Temp Plate",
-    "OTHER_2": "High Temp Plate",
-    "OTHER_3": "High Temp Plate",
-    "OTHER_4": "High Temp Plate"
-  },
-  "filamentPresets": {
-    "PLA": "Generic PLA @Prusa MK4",
-    "PLA_AESTHETIC": "Generic PLA Silk @System",
-    "PLA_CF": "Generic PLA-CF @Prusa",
-    "PETG": "Generic PETG @Prusa MK4",
-    "PETG_PREMIUM": "Generic PETG-CF @System",
-    "ABS": "Generic ABS @Prusa MK4",
-    "ASA": "Generic ASA @Prusa MK4",
-    "TPU": "Generic TPU @Prusa MK4",
-    "OTHER_1": "Generic PETG @Prusa MK4",
-    "OTHER_2": "Generic PETG @Prusa MK4",
-    "OTHER_3": "Generic PETG @Prusa MK4",
-    "OTHER_4": "Generic PETG @Prusa MK4"
-  },
+  "plates": {},
   "generated": true
 }

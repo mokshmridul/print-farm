@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { strToU8, zipSync } from "fflate";
 import type { NextRequest } from "next/server";
+import { MATERIAL_IDS } from "@print/shared";
 import { ProfileUploadRejected, parseProfileUpload } from "@/lib/slicer-profile-upload";
 
 const db = vi.hoisted(() => ({
@@ -108,16 +109,16 @@ describe("/api/admin/slicer-profiles", () => {
     expect(db.createMany).not.toHaveBeenCalled();
   });
 
-  it("outside advanced mode, takes presets only for the shop's own materials", async () => {
+  it("outside advanced mode, takes filament presets for every material and nothing for the printer", async () => {
     vi.stubEnv("ADVANCED_PROFILES", "");
     const state = await (await GET()).json();
-    expect(state.slots.map((s: { slot: string }) => s.slot)).toEqual(["filament:OTHER_1", "filament:OTHER_2", "filament:OTHER_3", "filament:OTHER_4"]);
-    for (const slot of ["filament:PLA", "machine", "process:200"]) {
+    expect(state.slots.map((s: { slot: string }) => s.slot)).toEqual(MATERIAL_IDS.map((m) => `filament:${m}`));
+    for (const slot of ["machine", "process:200"]) {
       expect((await POST(req(`?slot=${slot}`))).status, slot).toBe(403);
     }
     // A bundle (no slot) is a whole printer.
     expect((await POST(req(""))).status).toBe(403);
-    expect((await DELETE(req("?slot=filament:PLA"))).status).toBe(403);
+    expect((await DELETE(req("?slot=machine"))).status).toBe(403);
     expect(db.createMany).not.toHaveBeenCalled();
 
     const res = await POST(req("?slot=filament:OTHER_1&name=abs-cf.json"));
@@ -228,13 +229,13 @@ describe("/api/admin/slicer-profiles", () => {
 describe("getPrinterProfile", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("is the installed printer, untouched, until one of the shop's own materials has a profile", async () => {
+  it("is the installed printer, untouched, until a filament preset is live", async () => {
     vi.stubEnv("ADVANCED_PROFILES", "");
     db.findMany.mockResolvedValueOnce([]);
     expect(await getPrinterProfile()).toEqual(getPrinterSpec());
-    // Only the shop's own materials' slots are even asked for.
+    // Only filament slots are even asked for.
     expect(db.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { status: "ACTIVE", slot: { in: ["filament:OTHER_1", "filament:OTHER_2", "filament:OTHER_3", "filament:OTHER_4"] } } }),
+      expect.objectContaining({ where: { status: "ACTIVE", slot: { in: MATERIAL_IDS.map((m) => `filament:${m}`) } } }),
     );
   });
 

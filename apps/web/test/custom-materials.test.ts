@@ -104,11 +104,15 @@ describe("switching one of them on (Catalog)", () => {
 });
 
 describe("what customers get", () => {
-  it("never offers one of the shop's own materials without a live profile, whatever is stored", async () => {
-    db.stored = { materials: { PLA: true, OTHER_1: true, OTHER_2: true }, customMaterials: { OTHER_1: { name: "PC" }, OTHER_2: { name: "PA-CF" } } };
-    db.live = [{ slot: "filament:OTHER_2" }];
+  it("never offers a material without a live preset of the owner's, whatever is stored", async () => {
+    db.stored = {
+      materials: { PLA: true, PETG: true, OTHER_1: true, OTHER_2: true },
+      customMaterials: { OTHER_1: { name: "PC" }, OTHER_2: { name: "PA-CF" } },
+    };
+    db.live = [{ slot: "filament:OTHER_2" }, { slot: "filament:PLA" }];
     const offered = await getCatalogAvailability();
-    expect(offered.materials).toMatchObject({ PLA: true, OTHER_1: false, OTHER_2: true });
+    // No built-in presets: PETG is switched on but has none, so it isn't sold.
+    expect(offered.materials).toMatchObject({ PLA: true, PETG: false, OTHER_1: false, OTHER_2: true });
   });
 });
 

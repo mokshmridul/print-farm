@@ -181,8 +181,9 @@ quotation), it starts a short tour at `/admin/setup`:
    bundle didn't bring them. Each file's layer height is suggested for you to
    confirm.
 3. **Filaments.** Drop your filament presets; each is matched to a material
-   from its filament type for you to confirm. Optional: anything you skip
-   uses the printer's stock preset.
+   from its filament type for you to confirm. No material comes with a
+   preset, so at least one is needed: a material without yours isn't on
+   sale.
 4. **Shop details.** Shop name (required), city, quotation initials (worked
    out from the name), WhatsApp, contact email, phone and address. The same
    fields as admin → Site, where you can change them, and the accent colour,
@@ -219,8 +220,23 @@ What to export from OrcaSlicer:
 
 Every preset is **test-sliced** on a 20 mm cube with the rest of your live
 presets before quotes use it. If OrcaSlicer rejects it, you see its error
-(Filament → Slicer profiles) and quotes keep using what was live. Anything you
-don't provide uses the generic preset the installer set up.
+(Filament → Slicer profiles) and quotes keep using what was live. Printer and
+process slots you don't provide keep the presets made for your printer; a
+material without your filament preset isn't on sale.
+
+## No built-in filament presets
+
+The image has no stock filament presets: a material (PLA, PETG, your own …)
+can only be switched on once your own OrcaSlicer filament preset for it has
+passed its test slice, on every install. Upload them in the setup tour or
+Filament → Slicer profiles, or put them in `profiles/filament/`. Remove one and
+the material comes off sale by itself.
+
+OrcaSlicer's bundled presets stay inside the image as reference data only:
+your exports name one as their parent (`inherits`), and a printer or process
+preset is test-sliced with OrcaSlicer's generic PLA when you have no filament
+live yet. That reference filament is written only into the throwaway test
+set; it is never sold or quoted with.
 
 ### The profiles folder
 
@@ -590,8 +606,9 @@ presets OrcaSlicer ships, inside the image, when the container starts with
 - the printer's machine preset
 - its 0.12 / 0.16 / 0.20 mm process presets (a missing height is derived from
   the printer's closest one)
-- one filament preset per material tier: the printer vendor's own "Generic"
-  preset where it has one, otherwise OrcaSlicer's universal library
+
+and no filament presets: each material needs yours (see
+[No built-in filament presets](#no-built-in-filament-presets)).
 
 Everything is flattened (the CLI doesn't resolve `inherits`) and written to
 `/data/printer` with a `printer.json` describing the printer, which both

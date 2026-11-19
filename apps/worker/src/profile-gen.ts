@@ -1,9 +1,10 @@
 /**
  * Printer profiles for self-hosted shops: turn any single-extruder, 0.4 mm
  * printer that OrcaSlicer ships into the standalone profile set the worker
- * slices with — one machine profile, a process profile per layer height and a
- * filament profile per material tier — plus `printer.json`, the printer's
- * description for the rest of the app (build volume, plate per material …).
+ * slices with — one machine profile and a process profile per layer height —
+ * plus `printer.json`, the printer's description for the rest of the app
+ * (build volume, …). There are no filament profiles: every material is sold
+ * only once the owner's own OrcaSlicer filament preset for it is live.
  *
  *   node dist/profile-gen.js list [profilesRoot]
  *   node dist/profile-gen.js generate "<machine preset name>" <outDir> [--multi-material] [--placeholder] [--name "<shown name>"] [profilesRoot]
@@ -29,6 +30,7 @@ import {
   LAYER_HEIGHTS_UM,
   MATERIAL_IDS,
   bedOf,
+  STAND_IN_PRINTER_NAME,
   cleanProfile,
   firstValue as first,
   plateFor,
@@ -46,6 +48,9 @@ interface IndexEntry {
 }
 
 export const DEFAULT_PROFILES_ROOT = "/opt/orca-profiles";
+
+/** The plate a material prints on until its own filament preset says. */
+const DEFAULT_PLATE = "Textured PEI Plate";
 
 /** Preset metadata — never configuration, so an `include` never carries it in.
  *  (The keys OrcaSlicer's JSON loader keeps out of a preset's config.) */
@@ -256,26 +261,6 @@ const PROCESS_PREFERENCE: Record<number, RegExp> = {
   200: /standard/i,
 };
 
-const OTHER_PLACEHOLDER = { types: ["PETG", "PET"], name: /\bGeneric PETG\b/i, exclude: /cf|hf|gf/i };
-
-/** What each tier slices as when the printer has no hand-tuned preset. */
-export const TIER_FILAMENTS: Record<MaterialId, { types: string[]; name: RegExp; exclude?: RegExp }> = {
-  PLA: { types: ["PLA"], name: /\bGeneric PLA\b/i, exclude: /silk|matte|high speed|cf|glow|wood|marble|metal|\+/i },
-  PLA_AESTHETIC: { types: ["PLA"], name: /silk/i },
-  PLA_CF: { types: ["PLA-CF"], name: /cf/i },
-  PETG: { types: ["PETG", "PET"], name: /\bGeneric PETG\b/i, exclude: /cf|hf|gf/i },
-  PETG_PREMIUM: { types: ["PETG-CF", "PETG", "PET"], name: /petg[- ]?cf/i },
-  ABS: { types: ["ABS"], name: /\bGeneric ABS\b/i, exclude: /gf|cf/i },
-  ASA: { types: ["ASA"], name: /\bGeneric ASA\b/i, exclude: /gf|cf|aero/i },
-  TPU: { types: ["TPU"], name: /\bGeneric TPU\b/i, exclude: /for ams|\d{2}a/i },
-  // The shop's own materials: a placeholder so every set is complete. The owner
-  // replaces it in admin, and a slot isn't offered until they have.
-  OTHER_1: OTHER_PLACEHOLDER,
-  OTHER_2: OTHER_PLACEHOLDER,
-  OTHER_3: OTHER_PLACEHOLDER,
-  OTHER_4: OTHER_PLACEHOLDER,
-};
-
 function pickProcess(
   presets: Profile[],
   machineName: string,
@@ -288,26 +273,6 @@ function pickProcess(
   );
   const preferred = fits.filter((p) => PROCESS_PREFERENCE[layerUm]!.test(String(p.name)));
   return (preferred.length ? preferred : fits).sort((a, b) => String(a.name).length - String(b.name).length)[0] ?? null;
-}
-
-function pickFilament(
-  filaments: (Profile & { __vendor: string })[],
-  tier: MaterialId,
-  machineName: string,
-  machine: Profile & { __vendor: string },
-): Profile | null {
-  const rule = TIER_FILAMENTS[tier];
-  const candidates = filaments.filter(
-    (f) =>
-      rule.types.includes(first(f.filament_type)) &&
-      rule.name.test(String(f.name)) &&
-      !(rule.exclude?.test(String(f.name)) ?? false) &&
-      isCompatible(f, machineName, machine),
-  );
-  const rank = (f: Profile & { __vendor: string }) =>
-    (f.__vendor === machine.__vendor ? 0 : f.__vendor === "OrcaFilamentLibrary" ? 1 : 2) * 10 +
-    (/^generic/i.test(String(f.name)) ? 0 : 1);
-  return candidates.sort((a, b) => rank(a) - rank(b) || String(a.name).length - String(b.name).length)[0] ?? null;
 }
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -330,7 +295,6 @@ export function generateProfiles(
   if (!choice) throw new Error(`${machineName} is not a single-extruder 0.4 mm printer this shop can quote for`);
 
   const processes = [...index.instantiable("process")];
-  const filaments = [...index.instantiable("filament")];
   const files: Record<string, Profile> = {};
   files["machine.json"] = cleanProfile(machine, "machine", machineName, machineName);
 
@@ -356,28 +320,22 @@ export function generateProfiles(
     files[`process.${(um / 1000).toFixed(2)}.json`] = cleanProfile(preset, "process", label, machineName);
   }
 
-  const plates = {} as Record<MaterialId, string>;
-  const sources = {} as Record<MaterialId, string>;
-  for (const tier of MATERIAL_IDS) {
-    const preset = pickFilament(filaments, tier, machineName, machine);
-    if (!preset) throw new Error(`${machineName}: no filament preset for ${tier}`);
-    const density = Number(first(preset.filament_density));
-    if (!(density > 0)) throw new Error(`${machineName}: ${String(preset.name)} has no density`);
-    files[`filament.${slug(tier)}.json`] = cleanProfile(preset, "filament", `${String(preset.name)} (${tier})`, machineName);
-    plates[tier] = plateFor(preset);
-    sources[tier] = String(preset.name);
-  }
+  // No filament presets: there are no built-in ones. Each material is sold
+  // only once the owner's own filament preset is live, and that preset brings
+  // the plate it prints on.
+  const plates = Object.fromEntries(MATERIAL_IDS.map((m) => [m, DEFAULT_PLATE])) as Record<MaterialId, string>;
 
   const spec: PrinterProfileSpec = {
     id: slug(machineName),
     machine: machineName,
-    name: displayName || choice.model,
+    // A stand-in is never named after the generic printer it's made from: the
+    // owner's own printer preset names it once live.
+    name: displayName || (placeholder ? STAND_IN_PRINTER_NAME : choice.model),
     vendor: choice.vendor,
     nozzleMm: 0.4,
     bedMm: choice.bedMm,
     multiMaterial,
     plates,
-    filamentPresets: sources,
     generated: true,
     ...(placeholder ? { placeholder: true } : {}),
   };
@@ -414,13 +372,7 @@ export async function main(argv: string[]) {
     const [machineName, outDir, root] = args as [string, string, string?];
     const set = generateProfiles(new ProfileIndex(root ?? DEFAULT_PROFILES_ROOT), machineName, multi, displayName, placeholder);
     writeProfileSet(set, outDir);
-    process.stdout.write(
-      `${set.spec.name}: ${Object.keys(set.files).length} profiles, bed ${set.spec.bedMm.join("×")} mm\n` +
-        Object.entries(set.spec.filamentPresets ?? {})
-          .map(([tier, preset]) => `  ${tier.padEnd(13)} ${preset} (${set.spec.plates[tier as MaterialId]})`)
-          .join("\n") +
-        "\n",
-    );
+    process.stdout.write(`${set.spec.name}: ${Object.keys(set.files).length} profiles, bed ${set.spec.bedMm.join("×")} mm\n`);
     return;
   }
   process.stderr.write('usage: profile-gen.js list [root] | generate "<machine>" <outDir> [--multi-material] [--placeholder] [--name "<shown name>"] [root]\n');

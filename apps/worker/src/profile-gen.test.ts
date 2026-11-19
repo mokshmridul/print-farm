@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { MATERIAL_IDS, ORCA_GENERIC_FILAMENTS } from "@print/shared";
+import { ORCA_GENERIC_FILAMENTS } from "@print/shared";
 import {
   ProfileIndex,
   bedOf,
@@ -98,17 +98,11 @@ describe("profile-gen", () => {
     expect(printers).toEqual([{ vendor: "Xyz", machine: MACHINE, model: "Xyz One", bedMm: [200, 210, 180] }]);
   });
 
-  it("generates a complete, flattened, CLI-safe set", () => {
+  it("generates a complete, flattened, CLI-safe set — with no filament presets", () => {
     const { spec, files } = generateProfiles(new ProfileIndex(root), MACHINE, false);
-    expect(Object.keys(files).sort()).toEqual(
-      [
-        "machine.json",
-        "process.0.12.json",
-        "process.0.16.json",
-        "process.0.20.json",
-        ...MATERIAL_IDS.map((m) => `filament.${m.toLowerCase().replace(/_/g, "-")}.json`),
-      ].sort(),
-    );
+    // No built-in filament presets: each material waits for the owner's own.
+    expect(Object.keys(files).sort()).toEqual(["machine.json", "process.0.12.json", "process.0.16.json", "process.0.20.json"]);
+    expect(spec).not.toHaveProperty("filamentPresets");
     for (const [name, profile] of Object.entries(files)) {
       expect(profile, name).not.toHaveProperty("inherits");
       expect(profile, name).not.toHaveProperty("filament_notes");
@@ -122,14 +116,7 @@ describe("profile-gen", () => {
     expect(files["process.0.20.json"]!.name).toContain("Standard");
     expect(files["process.0.16.json"]).toMatchObject({ layer_height: "0.16" });
     expect(String(files["process.0.16.json"]!.name)).toContain("derived");
-    // The vendor's own PLA beats the library; the library covers the rest.
-    expect(spec.filamentPresets?.PLA).toBe("Generic PLA @Xyz");
-    expect(spec.filamentPresets?.PLA_AESTHETIC).toBe("Generic PLA Silk @System");
-    expect(spec.filamentPresets?.PETG).toBe("Generic PETG @System");
-    expect(spec.filamentPresets?.PETG_PREMIUM).toBe("Generic PETG-CF @System");
-    expect(files["filament.petg.json"]!.filament_density).toEqual(["1.24"]);
-    // ASA has no textured-plate temperature here, so it prints on the hot plate.
-    expect(spec.plates.ASA).toBe("High Temp Plate");
+    // Each material's plate comes from its own preset once uploaded.
     expect(spec.plates.PLA).toBe("Textured PEI Plate");
     expect(spec).toMatchObject({ id: "xyz-one-0-4-nozzle", name: "Xyz One", bedMm: [200, 210, 180], multiMaterial: false, generated: true });
   });

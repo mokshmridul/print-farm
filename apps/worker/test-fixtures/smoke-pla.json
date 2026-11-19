@@ -1,0 +1,7 @@
+{
+  "from": "User",
+  "inherits": "Generic PLA @System",
+  "name": "Smoke PLA",
+  "filament_settings_id": ["Smoke PLA"],
+  "version": "2.5.1.0"
+}

@@ -75,6 +75,31 @@ export PRINTER_MACHINE="Prusa MK4 0.4 nozzle"
 dc up -d --no-build
 wait_healthy
 
+echo "== still no quotes: no material has a built-in preset"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$origin/api/uploads" \
+  -H "Origin: $origin" -H "X-Requested-With: XMLHttpRequest" \
+  -F "file=@$repo/apps/worker/test-fixtures/calibration-cube.stl;type=model/stl")
+echo "$code  POST /api/uploads"
+[ "$code" = 503 ] || { echo "a shop with no filament preset accepted an upload" >&2; exit 1; }
+
+echo "== the owner uploads a PLA preset (an OrcaSlicer export)"
+jar="$work/cookies"
+admin() { curl -s -b "$jar" -c "$jar" -H "Origin: $origin" -H "X-Requested-With: XMLHttpRequest" "$@"; }
+admin -o /dev/null -X POST "$origin/api/admin/login" -H "Content-Type: application/json" \
+  --data "{\"password\":\"$ADMIN_PASSWORD\"}"
+code=$(admin -o /dev/null -w '%{http_code}' -X POST "$origin/api/admin/slicer-profiles?slot=filament:PLA&name=smoke-pla.json" \
+  -H "Content-Type: application/octet-stream" --data-binary "@$repo/apps/worker/test-fixtures/smoke-pla.json")
+echo "$code  POST /api/admin/slicer-profiles (filament:PLA)"
+[ "$code" = 202 ] || { echo "preset upload refused" >&2; exit 1; }
+for _ in $(seq 1 60); do
+  state=$(admin "$origin/api/admin/slicer-profiles")
+  live=$(python3 -c 'import json,sys; s=json.load(sys.stdin); r=[x for x in s["slots"] if x["slot"]=="filament:PLA"][0]; print("live" if r["live"] else ("failed: "+r["lastError"]) if r["lastError"] else "")' <<<"$state")
+  case "$live" in live) break ;; failed*) echo "PLA preset $live" >&2; exit 1 ;; esac
+  sleep 5
+done
+[ "$live" = live ] || { echo "PLA preset never went live" >&2; exit 1; }
+echo "ok: PLA preset passed its test slice and is live"
+
 echo "== public pages"
 for path in /api/health / /quote /contact /faq /materials /pricing; do
   code=$(curl -s -o /dev/null -w '%{http_code}' "$origin$path")

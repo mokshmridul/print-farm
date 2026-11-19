@@ -1,4 +1,4 @@
-import { chmod, chown, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, chmod, chown, mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { Queue, Worker, type Job } from "bullmq";
 import IORedis from "ioredis";
@@ -23,7 +23,7 @@ import {
   RETENTION_BOUNDS,
   type PurgeJobData,
 } from "@print/shared";
-import { config } from "./config.js";
+import { config, filamentProfile } from "./config.js";
 import { INGEST_WORKER_OPTIONS, processIngestJob, terminalCleanup } from "./ingest.js";
 import { renderThumbnailIsolated } from "./parse-runner.js";
 import { runSlice } from "./orca.js";
@@ -143,6 +143,13 @@ async function processJob(job: Job<SliceJobData>): Promise<void> {
   // the web takes no quotes then, so a job here is stale or forged.
   if (!printerReady(profileSet.spec)) {
     throw new Error("No printer is set up yet: refusing to slice for a customer");
+  }
+  // No built-in filament presets: a material without the owner's live preset
+  // isn't on sale, so a job for one is stale or forged.
+  try {
+    await access(join(profileSet.dir, filamentProfile(settings.material)));
+  } catch {
+    throw new Error(`No filament preset for ${settings.material}: refusing to slice for a customer`);
   }
   if (
     // The key names the printer — and in advanced mode the revision of the

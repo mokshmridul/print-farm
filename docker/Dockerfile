@@ -129,7 +129,7 @@ RUN pnpm --filter @print/db generate \
     && pnpm --filter @print/db deploy --legacy /opt/migrate \
     && pnpm --filter @print/worker deploy --legacy --prod /opt/worker-app \
     && find /opt/worker-app -type f \( -name '*.test.ts' -o -name '*.test.js' \) -delete \
-    && rm -rf /opt/worker-app/test-fixtures /opt/worker-app/src /opt/worker-app/build.mjs
+    && rm -rf /opt/worker-app/test-fixtures /opt/worker-app/src /opt/worker-app/build.mjs /opt/worker-app/vitest.config.ts
 # Admin-password hashing with the lockfile's own bcryptjs — the library the
 # login route verifies with. Next bundles it into the server, so the standalone
 # output has no importable copy; bundle the helper into one self-contained file.

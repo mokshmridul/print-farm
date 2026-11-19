@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { LAYER_HEIGHTS_UM, MATERIAL_IDS, type LayerHeightUm, type MaterialId } from "./quote-types";
-import type { PrinterProfileSpec } from "./printer";
+import { STAND_IN_PRINTER_NAME, type PrinterProfileSpec } from "./printer";
 
 /**
  * OrcaSlicer presets as this shop handles them: generated from Orca's bundled
@@ -262,7 +262,9 @@ export function applyActiveProfiles(base: PrinterProfileSpec, uploads: readonly 
       if (meta.data.bedMm) spec.bedMm = meta.data.bedMm;
       if (meta.data.nozzleMm) spec.nozzleMm = meta.data.nozzleMm;
       spec.machine = meta.data.presetName;
-      // The owner's own printer is live: the generic stand-in is replaced.
+      // The owner's own printer is live: the generic stand-in is replaced, and
+      // so is its name, unless the shop was given one for customers.
+      if (base.placeholder && base.name === STAND_IN_PRINTER_NAME) spec.name = meta.data.presetName;
       delete spec.placeholder;
     }
     const material = slotMaterial(slot);

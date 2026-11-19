@@ -33,12 +33,16 @@ export interface PrinterProfileSpec {
   placeholder?: boolean;
 }
 
+/** What a stand-in printer is called until the owner's own printer preset
+ *  names it (or the installer was given a name for customers). */
+export const STAND_IN_PRINTER_NAME = "3D printer";
+
 /** No printer set up yet. Only ever a stand-in — never sliced with for a
  *  customer, because printerReady() is false for it. */
 export const UNCONFIGURED_PRINTER_SPEC: PrinterProfileSpec = {
   id: "unconfigured",
   machine: "",
-  name: "3D printer",
+  name: STAND_IN_PRINTER_NAME,
   vendor: "",
   nozzleMm: 0.4,
   bedMm: [250, 250, 250],

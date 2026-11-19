@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import { cache } from "react";
+import { getCatalogAvailability } from "./catalog-availability";
 import { prisma } from "@print/db";
 import {
-  CUSTOM_FILAMENT_SLOTS,
+  FILAMENT_SLOTS,
   UNCONFIGURED_PRINTER_SPEC,
   applyActiveProfiles,
   parsePrinterSpec,
@@ -46,18 +47,26 @@ export const getPrinterProfile = cache(async (): Promise<PrinterProfileSpec> => 
   const base = getPrinterSpec();
   const advanced = advancedProfilesEnabled();
   const rows = await prisma.slicerProfileUpload.findMany({
-    where: advanced ? { status: "ACTIVE" } : { status: "ACTIVE", slot: { in: [...CUSTOM_FILAMENT_SLOTS] } },
+    where: advanced ? { status: "ACTIVE" } : { status: "ACTIVE", slot: { in: [...FILAMENT_SLOTS] } },
     select: { id: true, slot: true, meta: true },
   });
   const live = rows.filter((r) => r.slot && slotInScope(r.slot, advanced));
   return applyActiveProfiles(base, live.map((r) => ({ ...r, slot: r.slot! })));
 });
 
-/** Whether customers can upload and get quotes: a printer is set up — picked
- *  from OrcaSlicer's list, or the owner's own printer preset is live. */
-export async function shopReady(): Promise<boolean> {
-  if (printerReady(getPrinterSpec())) return true;
-  return printerReady(await getPrinterProfile().catch(() => getPrinterSpec()));
+/** What still stands between the shop and its first quote: a printer (picked
+ *  from OrcaSlicer's list, or the owner's own preset live), and a material on
+ *  sale — none has a built-in preset, so one needs the owner's. */
+export async function shopSetupGaps(): Promise<{ printer: boolean; material: boolean }> {
+  const printer = printerReady(getPrinterSpec()) || printerReady(await getPrinterProfile().catch(() => getPrinterSpec()));
+  const { materials } = await getCatalogAvailability();
+  return { printer: !printer, material: !Object.values(materials).some(Boolean) };
 }
 
-export const SHOP_NOT_READY_MESSAGE = "This shop isn't taking quotes yet — its printer is still being set up.";
+/** Whether customers can upload and get quotes. */
+export async function shopReady(): Promise<boolean> {
+  const gaps = await shopSetupGaps();
+  return !gaps.printer && !gaps.material;
+}
+
+export const SHOP_NOT_READY_MESSAGE = "This shop isn't taking quotes yet — it's still being set up.";

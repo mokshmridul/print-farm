@@ -10,7 +10,16 @@ const apiUtil = vi.hoisted(() => ({
 }));
 
 vi.mock("@print/db", () => ({
-  prisma: { appSetting: { findUnique: db.findUnique, upsert: db.upsert } },
+  prisma: {
+    appSetting: { findUnique: db.findUnique, upsert: db.upsert },
+    slicerProfileUpload: {
+      findMany: vi.fn(async () => {
+        // Every material has the owner's live filament preset (none are built in).
+        const { FILAMENT_SLOTS } = await import("@print/shared");
+        return FILAMENT_SLOTS.map((slot) => ({ id: `live-${slot}`, slot, meta: { presetName: `Shop ${slot}` } }));
+      }),
+    },
+  },
   Prisma: {},
 }));
 vi.mock("@/lib/api-util", () => apiUtil);

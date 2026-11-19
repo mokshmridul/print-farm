@@ -1,10 +1,8 @@
 import {
-  CUSTOM_MATERIAL_IDS,
   LAYER_HEIGHTS_UM,
   MATERIAL_IDS,
   isCustomMaterial,
   type ColourId,
-  type CustomMaterialId,
   type LayerHeightUm,
   type MaterialId,
 } from "./quote-types";
@@ -74,26 +72,28 @@ export function layerHeightLabel(um: number): string {
   return `${(um / 1000).toFixed(2)} mm`;
 }
 
-/** Why one of the shop's own materials can't be offered yet, or null when it
- *  can: it needs a name, and a live (test-sliced) OrcaSlicer filament profile. */
-export function customMaterialProblem(
-  avail: Availability,
-  id: CustomMaterialId,
-  ready: ReadonlySet<CustomMaterialId>,
-): string | null {
+/** Why a material can't be offered yet, or null when it can. There are no
+ *  built-in filament presets: every material needs a live (test-sliced)
+ *  OrcaSlicer filament preset of the owner's, and the shop's own materials a
+ *  name as well. */
+export function materialProblem(avail: Availability, id: MaterialId, ready: ReadonlySet<MaterialId>): string | null {
   const label = materialName(id, avail.customMaterials);
-  if (!avail.customMaterials[id]?.name) return `${label} needs a name first.`;
-  if (!ready.has(id)) return `${label} needs an OrcaSlicer profile first — start from one of OrcaSlicer's or upload your own.`;
+  if (isCustomMaterial(id)) {
+    if (!avail.customMaterials[id]?.name) return `${label} needs a name first.`;
+    if (!ready.has(id)) return `${label} needs an OrcaSlicer profile first — start from one of OrcaSlicer's or upload your own.`;
+    return null;
+  }
+  if (!ready.has(id)) return `${label} needs your OrcaSlicer filament preset first — upload it in Slicer profiles.`;
   return null;
 }
 
-/** Availability as customers get it: one of the shop's own materials is only
- *  on when it's switched on AND named AND has a live filament profile, so a
- *  profile that later fails or is removed takes it off sale by itself. */
-export function effectiveAvailability(avail: Availability, ready: ReadonlySet<CustomMaterialId>): Availability {
+/** Availability as customers get it: a material is only on when it's switched
+ *  on AND has a live filament preset (AND, for the shop's own, a name), so a
+ *  preset that later fails or is removed takes it off sale by itself. */
+export function effectiveAvailability(avail: Availability, ready: ReadonlySet<MaterialId>): Availability {
   const materials = { ...avail.materials };
-  for (const id of CUSTOM_MATERIAL_IDS) {
-    if (materials[id] && customMaterialProblem(avail, id, ready)) materials[id] = false;
+  for (const id of MATERIAL_IDS) {
+    if (materials[id] && materialProblem(avail, id, ready)) materials[id] = false;
   }
   return { ...avail, materials };
 }
@@ -162,28 +162,28 @@ export interface PublicMaterial {
   name: string;
   enabled: boolean;
   colours: PublicColour[];
-  /** Admin view of one of the shop's own materials: what it still needs. */
+  /** Admin view: what the material still needs before it can be sold. */
   setup?: { named: boolean; ready: boolean; problem: string | null };
 }
 
 /** Serialisable view of the full palette with per-item enabled flags, for the
  *  customer quote UI and the admin editor. */
-/** Pass `ready` (the admin view) to describe what each of the shop's own
- *  materials still needs; customers get effectiveAvailability instead. */
+/** Pass `ready` (the admin view) to describe what each material still needs;
+ *  customers get effectiveAvailability instead. */
 export function toPublicCatalog(
   avail: Availability,
-  ready?: ReadonlySet<CustomMaterialId>,
+  ready?: ReadonlySet<MaterialId>,
 ): { materials: PublicMaterial[]; layerHeights: LayerHeightUm[] } {
   const materials = MATERIAL_IDS.map((m) => ({
     id: m,
     name: materialName(m, avail.customMaterials),
     enabled: isMaterialEnabled(avail, m),
-    ...(ready && isCustomMaterial(m)
+    ...(ready
       ? {
           setup: {
-            named: Boolean(avail.customMaterials[m]?.name),
+            named: !isCustomMaterial(m) || Boolean(avail.customMaterials[m]?.name),
             ready: ready.has(m),
-            problem: customMaterialProblem(avail, m, ready),
+            problem: materialProblem(avail, m, ready),
           },
         }
       : {}),

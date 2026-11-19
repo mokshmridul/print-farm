@@ -3,7 +3,7 @@ import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile 
 import { join } from "node:path";
 import { prisma } from "@print/db";
 import {
-  CUSTOM_FILAMENT_SLOTS,
+  FILAMENT_SLOTS,
   applyActiveProfiles,
   cleanProfile,
   isProfileSlot,
@@ -34,7 +34,7 @@ const OLD_SET_GRACE_MS = 60 * 60 * 1000;
 function liveWhere() {
   return config.advancedProfiles
     ? { status: "ACTIVE" as const }
-    : { status: "ACTIVE" as const, slot: { in: [...CUSTOM_FILAMENT_SLOTS] } };
+    : { status: "ACTIVE" as const, slot: { in: [...FILAMENT_SLOTS] } };
 }
 
 /** The build volume models are packed onto and judged against: the owner's

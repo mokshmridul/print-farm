@@ -29,7 +29,13 @@ vi.mock("@print/db", () => ({
       create: mocks.create,
     },
     // No live presets for the shop's own materials: the printer as installed.
-    slicerProfileUpload: { findMany: vi.fn(async () => []) },
+    slicerProfileUpload: {
+      findMany: vi.fn(async () => {
+        // Every material has the owner's live filament preset (none are built in).
+        const { FILAMENT_SLOTS } = await import("@print/shared");
+        return FILAMENT_SLOTS.map((slot) => ({ id: `live-${slot}`, slot, meta: { presetName: `Shop ${slot}` } }));
+      }),
+    },
     appSetting: { findUnique: mocks.availability },
   },
 }));

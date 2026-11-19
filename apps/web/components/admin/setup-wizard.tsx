@@ -139,6 +139,11 @@ export function SetupWizard({
   // or the owner's being test-sliced, or one in the profiles folder.
   const machine = state.slots.find((row) => row.slot === "machine");
   const printerSet = state.printer.ready || !machine || Boolean(machine.testing || machine.fromFolder);
+  // No material has a built-in preset, so the shop needs at least one of the
+  // owner's to sell anything: live, being tested, or from the folder.
+  const filamentSet = state.slots.some(
+    (row) => row.slot.startsWith("filament:") && Boolean(row.live || row.testing || row.fromFolder),
+  );
 
   const addFiles = async (s: UploadStep, files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -214,7 +219,7 @@ export function SetupWizard({
 
   const at = steps.indexOf(step);
   const go = (to: number) => setStep(steps[Math.max(0, Math.min(steps.length - 1, to))]!);
-  const blocked = step === "printer" && !printerSet;
+  const blocked = (step === "printer" && !printerSet) || (step === "filament" && !filamentSet);
   const [shopName, setShopName] = useState(profile?.brandName ?? DEFAULT_SITE_PROFILE.brandName);
 
   return (
@@ -308,7 +313,10 @@ export function SetupWizard({
             <SlotList rows={slotsFor(step)} compact printerReady={state.printer.ready} />
             {blocked ? (
               <p className="text-xs text-faint">
-                The shop can&apos;t quote without its printer, so this step comes first. You can carry on while it test-slices.
+                {step === "printer"
+                  ? "The shop can't quote without its printer, so this step comes first."
+                  : "No material comes with a preset, so the shop needs at least one of yours to sell anything."}{" "}
+                You can carry on while it test-slices.
               </p>
             ) : null}
           </>
@@ -328,9 +336,14 @@ export function SetupWizard({
             </p>
             <SlotList rows={state.slots} compact printerReady={state.printer.ready} />
             {state.busy ? <p className="text-xs text-accent">Still test-slicing — you can finish now; it carries on.</p> : null}
-            {!state.printer.ready ? (
-              <p className="text-xs text-faint">Customers can get quotes as soon as your printer passes its test slice.</p>
-            ) : null}
+            {!state.printer.ready || !state.slots.some((r) => r.slot.startsWith("filament:") && r.live) ? (
+              <p className="text-xs text-faint">
+                Customers can get quotes as soon as your printer and a filament pass their test slices. Then switch each
+                material you sell on under Filament.
+              </p>
+            ) : (
+              <p className="text-xs text-faint">Switch each material you sell on under Filament: only those with a preset can be.</p>
+            )}
           </>
         )}
         {error ? (
@@ -373,7 +386,7 @@ function Welcome({ advanced, steps, printerName }: { advanced: boolean; steps: r
   const what: Partial<Record<Step, string>> = {
     printer: "Drop in your printer, exported from OrcaSlicer. Quotes are sliced with it.",
     process: "Your 0.12, 0.16 and 0.20 mm process presets, if the printer bundle didn't bring them.",
-    filament: "The filament presets you print with, one per material you sell. Optional.",
+    filament: "The filament presets you print with, one per material you sell. No material comes with one, so you need at least one.",
     shop: "Your shop's name, city and contact details for the site, quotes and PDFs.",
   };
   return (
@@ -431,7 +444,7 @@ function UploadIntro({ step }: { step: UploadStep }) {
     <p className="text-sm text-muted">
       Export each filament preset as <code>.json</code> (or an <code>.orca_filament</code> bundle holding just that
       filament) and check the material it&apos;s for. Silk and matte PLA go to the aesthetic tier, carbon-fibre PETG to
-      premium PETG, anything else to one of your own materials.
+      premium PETG, anything else to one of your own materials. A material without your preset isn&apos;t on sale.
     </p>
   );
 }
@@ -631,8 +644,10 @@ function SlotList({
   const own = (row: SlicerProfilesState["slots"][number]) =>
     row.slot === "machine" || Boolean(row.live || row.testing || row.fromFolder || row.lastError);
   const shown = compact ? rows.filter(own) : rows;
-  const rest = rows.length - shown.length;
-  if (shown.length === 0 && rest === 0) return null;
+  const hidden = rows.filter((row) => !shown.includes(row));
+  const restFilaments = hidden.filter((row) => row.slot.startsWith("filament:")).length;
+  const restOther = hidden.length - restFilaments;
+  if (shown.length === 0 && hidden.length === 0) return null;
   return (
     <div className="space-y-2">
       {shown.length > 0 ? (
@@ -645,8 +660,10 @@ function SlotList({
                   <span className="text-muted">{row.live.presetName}</span>
                 ) : row.slot === "machine" && !printerReady ? (
                   "Not set up yet"
+                ) : row.slot.startsWith("filament:") ? (
+                  "No preset yet — not on sale"
                 ) : (
-                  "The printer's stock preset"
+                  "The printer's own preset"
                 )}
                 {row.live?.testGrams != null ? ` · test cube ${row.live.testGrams.toFixed(1)} g` : ""}
                 {row.testing ? <span className="text-accent"> · test-slicing…</span> : null}
@@ -657,10 +674,15 @@ function SlotList({
           ))}
         </ul>
       ) : null}
-      {rest > 0 ? (
+      {restOther > 0 ? (
         <p className="text-xs text-faint">
-          {shown.length > 0 ? "The other" : "All"} {rest} {rest === 1 ? "slot uses its" : "slots use their"} stock preset
-          from the printer.
+          {restOther} more {restOther === 1 ? "process uses its" : "processes use their"} preset from the printer.
+        </p>
+      ) : null}
+      {restFilaments > 0 ? (
+        <p className="text-xs text-faint">
+          {restFilaments} more {restFilaments === 1 ? "material has" : "materials have"} no preset yet, so{" "}
+          {restFilaments === 1 ? "it isn't" : "they aren't"} on sale.
         </p>
       ) : null}
     </div>

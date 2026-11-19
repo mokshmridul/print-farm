@@ -8,7 +8,12 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 // preset live over the generic stand-in of own-presets mode.
 
 const db = vi.hoisted(() => ({ findMany: vi.fn(async (): Promise<unknown[]> => []) }));
-vi.mock("@print/db", () => ({ prisma: { slicerProfileUpload: { findMany: db.findMany } }, Prisma: {} }));
+vi.mock("@print/db", () => ({
+  // No saved catalog: the defaults, PLA switched on.
+  prisma: { slicerProfileUpload: { findMany: db.findMany }, appSetting: { findUnique: vi.fn(async () => null) } },
+  Prisma: {},
+}));
+const PLA_LIVE = { id: "f", slot: "filament:PLA", meta: { presetName: "My PLA" } };
 
 const dir = mkdtempSync(join(tmpdir(), "shop-ready-"));
 const spec = (extra: object) => {
@@ -55,21 +60,25 @@ describe("shopReady", () => {
     expect(await shopReady()).toBe(false);
   });
 
-  it("is true for a printer picked from OrcaSlicer's list, without asking the database", async () => {
-    const { shopReady } = await printerLib(spec({ id: "prusa-mk4-0-4-nozzle", machine: "Prusa MK4 0.4 nozzle" }), "0");
-    expect(await shopReady()).toBe(true);
-    expect(db.findMany).not.toHaveBeenCalled();
+  it("needs a material on sale even with a printer picked from OrcaSlicer's list: none has a built-in preset", async () => {
+    const lib = await printerLib(spec({ id: "prusa-mk4-0-4-nozzle", machine: "Prusa MK4 0.4 nozzle" }), "0");
+    expect(await lib.shopSetupGaps()).toEqual({ printer: false, material: true });
+    expect(await lib.shopReady()).toBe(false);
+
+    const again = await printerLib(spec({ id: "prusa-mk4-0-4-nozzle", machine: "Prusa MK4 0.4 nozzle" }), "0");
+    db.findMany.mockResolvedValue([PLA_LIVE]);
+    expect(await again.shopReady()).toBe(true);
   });
 
   it("waits on the generic stand-in until the owner's printer preset is live", async () => {
-    const { shopReady } = await printerLib(spec({ placeholder: true }));
-    db.findMany.mockResolvedValue([{ id: "f", slot: "filament:PLA", meta: { presetName: "My PLA" } }]);
-    expect(await shopReady()).toBe(false);
+    const { shopSetupGaps } = await printerLib(spec({ placeholder: true }));
+    db.findMany.mockResolvedValue([PLA_LIVE]);
+    expect(await shopSetupGaps()).toEqual({ printer: true, material: false });
 
     const again = await printerLib(spec({ placeholder: true }));
     db.findMany.mockResolvedValue([
       { id: "m", slot: "machine", meta: { presetName: "My Voron", bedMm: [300, 300, 280] } },
-      { id: "f", slot: "filament:PLA", meta: { presetName: "My PLA" } },
+      PLA_LIVE,
     ]);
     expect(await again.shopReady()).toBe(true);
   });
